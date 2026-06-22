@@ -5,24 +5,73 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
 ```
 
-## R Markdown
+## Ejercicio 1
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Empezamos cargando los datos y observando su distribución
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r cars}
-summary(cars)
+```{r summary_data, echo=FALSE}
+data_refugio <- read.csv("./refugio.csv")
+
+data_refugio$animal_type = as.factor(data_refugio$animal_type)
+data_refugio$sexo = as.factor(data_refugio$sexo)
+data_refugio$breed_main = as.factor(data_refugio$breed_main)
+data_refugio$desenlace = as.factor(data_refugio$desenlace)
+data_refugio$dog = as.factor(data_refugio$dog)
+data_refugio$sterilized = as.factor(data_refugio$sterilized)
+
+summary(data_refugio)
 ```
+Observando estos resultados, vemos que tenemos una gran cantidad de datos. La distribución entre perros y gatos es bastante pareja, aunque hay un poco más de perros. La distribución de sexos es más equitativa aún. Por otro lado, la mayoría de los animales no estaban esterilizados al llegar al refugio. La edad de los animales cuando llegaron al refugio es por lo general pequeña, pero tenemos algunos casos más extremos, como el animal que entró con 24 años. Las edades se registran con números enteros, pero el tiempo de estadía está registrado con coma.
 
-## Including Plots
+Respecto al desenlace, la mayoría de los animales del refugio fueron adoptados (52.9%), el resto siendo transferido (28.5%), devuelto (14.7%), o liquidado (3.7%).
 
-You can also embed plots, for example:
+Hay también una gran variedad de razas representadas, en total, 473 razas distintas. Solo 120 de estas razas tienen más de 100 muestras. En promedio hay 291 muestras por especie y la mediana es 22 mustras por especie. De estas especies, 400 son de perro y 73 de gato.
+
+```{r razas, echo=FALSE}
+data_refugio %>%
+  summarise(cantidad = n_distinct(breed_main)) %>%
+
+data_refugio %>%
+  group_by(breed_main) %>%
+  summarise(cantidad = n(), .groups = "drop") %>%
+  filter(cantidad >= 100) %>%
+  arrange(-cantidad) 
+
+data_refugio %>%
+  group_by(breed_main) %>%
+  summarise(cantidad = n(), .groups = "drop") %>%
+  arrange(-cantidad) 
+
+data_refugio %>%
+  group_by(breed_main) %>%
+  summarise(cantidad = n(), .groups = "drop") %>%
+  summarise(promedio = mean(cantidad), mediana = median(cantidad)) 
+
+
+data_refugio %>%
+  group_by(animal_type) %>%
+  summarise(cantidad = n_distinct(breed_main))
+```
+## Ejercicio 2
+
+Franquito: en el bloque de código, r significa que es código r, y dps le ponés un titulo al bloque que ayuda dps a encontrar errores. El titulo es opcional pero no se puede repetir.
 
 ```{r pressure, echo=FALSE}
 plot(pressure)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Ejercicio 3
+
+bla bla
+
+
+## Ejercicio 4
+
+bla bla
