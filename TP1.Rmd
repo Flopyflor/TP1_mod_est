@@ -1,6 +1,8 @@
 ---
 title: "TP - Modelado Estadístico"
-output: pdf_document
+output: 
+  pdf_document:
+    latex_engine: xelatex
 ---
 
 ```{r setup, include=FALSE}
@@ -8,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## R Markdown
-
+jjj
 This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
@@ -26,3 +28,274 @@ plot(pressure)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Cargar librerías
+```{r}
+library(dplyr)
+library(ggplot2)
+library(fitdistrplus)
+```
+
+## Cargar Datos
+
+```{r}
+refugio <- read.csv("refugio.csv")
+```
+
+## Ejercicio 2
+
+### Inciso (a): 
+Para evaluar posteriormente la calidad de los estimadores, se definió como "tasa verdadera" de adopción de cada raza la proporción de animales adoptados sobre el total de animales de esa raza utilizando todo el conjunto de datos. Con el objetivo de obtener estimaciones confiables, se consideraron únicamente aquellas razas con al menos 100 observaciones, tal como indica la consigna.
+
+
+```{r}
+verdad <- refugio %>%
+  group_by(breed_main) %>%
+  summarise(
+    n = n(),
+    adoptados = sum(desenlace == "Adopcion", na.rm = TRUE),
+    tasa_real = adoptados / n,
+    .groups = "drop"
+  ) %>%
+  filter(n >= 100) %>%
+  arrange(desc(n))
+
+head(verdad)
+```
+
+Luego de aplicar el filtro de al menos 100 animales por raza, se obtuvo un conjunto de razas para las cuales la tasa de adopción puede considerarse una aproximación confiable de la probabilidad real de adopción. Estas tasas se utilizarán posteriormente como referencia ("verdad") para evaluar el desempeño de los distintos estimadores.
+
+
+```{r}
+
+verdad %>%
+  slice_max(n, n = 10) %>%
+  ggplot(aes(
+    x = reorder(breed_main, n),
+    y = n,
+    fill = breed_main
+  )) +
+  geom_col(show.legend = FALSE) +   # también elimina la leyenda
+  coord_flip() +
+  labs(
+    title = "Razas con mayor Cantidad de Animales",
+    x = NULL,
+    y = "Cantidad de Animales"
+  ) +
+  theme_minimal()
+
+
+```
+En la Figura 1 se observa una marcada diferencia en la cantidad de animales registrados entre las distintas razas. Las razas Domestic Shorthair Mix y Domestic Shorthair concentran una cantidad considerablemente mayor de observaciones que el resto, mientras que las demás presentan tamaños de muestra bastante menores. Esta diferencia justifica la necesidad de utilizar únicamente razas con un número suficiente de observaciones al definir la tasa verdadera.
+
+```{r}
+verdad %>%
+  slice_max(tasa_real, n = 10) %>%
+  ggplot(aes(x = reorder(breed_main, tasa_real), y = tasa_real, fill = breed_main)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Razas con mayor tasa real",
+    x = NULL,
+    y = "Tasa Real"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+La Figura 2 presenta las diez razas con mayor tasa de adopción calculada sobre el conjunto completo de datos. Se observa que las tasas más altas se encuentran entre aproximadamente 0.65 y 0.75, siendo Blue Lacy Mix la raza con la mayor proporción de adopciones dentro del grupo analizado. Asimismo, las diferencias entre las primeras posiciones son relativamente pequeñas, lo que indica que varias razas presentan probabilidades de adopción similares.
+
+
+### Inciso (b): 
+Con el objetivo de simular un escenario con información limitada, se tomó una muestra aleatoria de m=15 animales para cada una de las razas consideradas en el inciso anterior. A partir de estas muestras se calculó la tasa cruda de adopción, definida como la proporción de animales adoptados dentro de cada muestra. Esta estimación representa la aproximación que se obtendría si solo se dispusiera de una cantidad reducida de observaciones por raza.
+
+Fijar una semilla
+
+```{r}
+set.seed(123)
+```
+
+Elegir el tamaño de muestra
+
+```{r}
+m <- 15
+```
+
+Quedarnos solamente con las razas del inciso (a)
+
+```{r}
+muestra <- refugio %>%
+  semi_join(verdad, by = "breed_main") # semi_join Simplemente elimina todas las razas que no están en verdad.
+```
+
+Tomar 15 animales por raza
+
+```{r}
+muestra <- muestra %>%
+  group_by(breed_main) %>%
+  slice_sample(n = m) %>%
+  ungroup()
+```
+
+Calcular la tasa cruda
+
+```{r}
+tasa_cruda <- muestra %>%
+  group_by(breed_main) %>%
+  summarise(
+    adoptados_muestra = sum(desenlace == "Adopcion"),
+    tasa_cruda = adoptados_muestra / m,
+    .groups = "drop"
+  )
+
+head(tasa_cruda)
+```
+
+
+```{r}
+comparacion <- verdad %>%
+  left_join(tasa_cruda, by = "breed_main")
+```
+
+```{r}
+ggplot(comparacion,
+       aes(x = tasa_real,
+           y = tasa_cruda)) +
+  geom_point() +
+  geom_abline(
+      slope = 1,
+      intercept = 0,
+      color = "red"
+  ) +
+  labs(
+    title = "Tasa cruda vs. tasa verdadera",
+      x = "Tasa verdadera",
+      y = "Tasa cruda"
+  ) +
+  theme_minimal()
+```
+
+La Figura 3 compara la tasa cruda obtenida a partir de la muestra con la tasa verdadera calculada utilizando la totalidad de los datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que ambas tasas coinciden exactamente.
+
+Se observa que, aunque existe una tendencia positiva entre ambas variables, numerosos puntos se encuentran alejados de la recta identidad. Esto indica que la tasa cruda presenta una variabilidad considerable cuando se estima a partir de únicamente 15 observaciones por raza. En algunos casos la tasa de adopción resulta sobreestimada, mientras que en otros se subestima respecto de la tasa verdadera.
+
+Este comportamiento era esperable, ya que el tamaño muestral reducido incrementa la variabilidad de las estimaciones. En el siguiente inciso se evaluará si el estimador Empirical Bayes permite reducir este error incorporando información proveniente del conjunto completo de razas.
+
+
+### Inciso (c): 
+Con el objetivo de incorporar información global al proceso de estimación, se ajustó una distribución Beta a las tasas muestrales obtenidas en el inciso anterior mediante máxima verosimilitud.
+
+Ajustar la distribución Beta
+
+```{r}
+fit_data <- tasa_cruda %>%
+  filter(tasa_cruda > 0, tasa_cruda < 1) %>%
+  pull(tasa_cruda)
+```
+
+```{r}
+ajuste <- fitdist(
+  fit_data,
+  "beta"
+)
+```
+```{r}
+alpha0 <- ajuste$estimate["shape1"]
+beta0  <- ajuste$estimate["shape2"]
+
+alpha0
+beta0
+```
+Los parámetros estimados fueron $\alpha_0$=3.15 y $\beta_0$=3.44, los cuales se utilizaron como distribución prior para construir el estimador Empirical Bayes.
+
+```{r}
+comparacion <- comparacion %>%
+  mutate(
+    tasa_EB = (alpha0 + adoptados_muestra) /
+              (alpha0 + beta0 + m)
+  )
+```
+
+```{r}
+ggplot(comparacion,
+       aes(x = tasa_real,
+           y = tasa_EB)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_abline(
+    slope = 1,
+    intercept = 0,
+    color = "red"
+  ) +
+  labs(
+    title = "Estimación Empirical Bayes vs. tasa verdadera",
+    x = "Tasa verdadera",
+    y = "Estimación Empirical Bayes"
+  ) +
+  theme_minimal()
+```
+La Figura 4 compara las estimaciones obtenidas mediante el método Empirical Bayes con la tasa verdadera de adopción calculada utilizando el conjunto completo de datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que la estimación coincide exactamente con la tasa verdadera.
+
+Se observa una relación positiva entre ambas variables, ya que las estimaciones Empirical Bayes tienden a seguir la tendencia de las tasas verdaderas. La mayoría de las observaciones se concentra alrededor de la recta identidad, lo que indica que el estimador logra aproximar adecuadamente la tasa de adopción de cada raza aun cuando se dispone únicamente de una muestra reducida de animales.
+
+Aunque aún se observan diferencias entre las estimaciones y la tasa verdadera, el efecto de contracción (shrinkage) propio del enfoque Empirical Bayes reduce la influencia de las fluctuaciones aleatorias presentes en las muestras pequeñas. En el siguiente inciso se cuantificará este comportamiento mediante el cálculo del error cuadrático medio (MSE), comparando el desempeño del estimador Empirical Bayes con el de la tasa cruda.
+
+
+### Inciso (d):
+
+Para comparar objetivamente ambos estimadores se calcula el Error Cuadrático Medio (MSE), utilizando como referencia la tasa verdadera definida en el inciso (a). Esta métrica permite cuantificar, en promedio, qué tan alejadas se encuentran las estimaciones respecto del valor considerado como verdadero para cada raza.
+
+Calcular los errores
+
+```{r}
+comparacion <- comparacion %>%
+  mutate(
+    error_crudo = (tasa_cruda - tasa_real)^2,
+    error_EB    = (tasa_EB - tasa_real)^2
+  )
+```
+
+Calcular el MSE
+
+```{r}
+mse_crudo <- mean(comparacion$error_crudo)
+
+mse_EB <- mean(comparacion$error_EB)
+
+mse_df <- data.frame(
+  Estimador = c("Tasa cruda", "Empirical Bayes"),
+  MSE = c(mse_crudo, mse_EB)
+)
+
+ggplot(mse_df, aes(x = Estimador, y = MSE, fill = Estimador)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = sprintf("%.4f", MSE)),
+            vjust = -0.5,
+            size = 5) +
+  scale_fill_manual(values = c("#5DA5DA", "#60BD68")) +
+  scale_y_continuous(
+    limits = c(0, max(mse_df$MSE) * 1.15)
+  ) +
+  labs(
+    title = "Comparación del Error Cuadrático Medio",
+    x = NULL,
+    y = "Error Cuadrático Medio (MSE)"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+¿Por cuánto mejora?
+
+```{r}
+mejora <- 100 * (mse_crudo - mse_EB) / mse_crudo
+
+mejora
+```
+La Figura 5 muestra que el estimador Empirical Bayes obtuvo un MSE de 0.0089, frente a 0.0150 para la tasa cruda. Esto representa una reducción del 40.7% en el error cuadrático medio, indicando que, en promedio, las estimaciones obtenidas mediante Empirical Bayes se encuentran considerablemente más próximas a la tasa verdadera.
+
+Estos resultados son consistentes con el comportamiento observado en los gráficos de los incisos anteriores. Mientras que la tasa cruda depende exclusivamente de los 15 animales seleccionados para cada raza y, por lo tanto, puede verse fuertemente afectada por la variabilidad muestral, el estimador Empirical Bayes incorpora además la información global contenida en la distribución prior. Como consecuencia, las estimaciones extremas son suavizadas hacia el promedio general, reduciendo la influencia del azar y produciendo estimaciones más estables.
+
+En conclusión, para este conjunto de datos y bajo el escenario planteado por la consigna, el estimador Empirical Bayes resulta preferible a la tasa cruda, ya que proporciona estimaciones más cercanas a la tasa verdadera cuando se dispone de una cantidad reducida de observaciones por raza.
+
+
+
+
