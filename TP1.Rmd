@@ -57,6 +57,7 @@ data_refugio %>%
   group_by(animal_type) %>%
   summarise(cantidad = n_distinct(breed_main))
 ```
+
 ## Ejercicio 2
 
 Franquito: en el bloque de código, r significa que es código r, y dps le ponés un titulo al bloque que ayuda dps a encontrar errores. El titulo es opcional pero no se puede repetir.
@@ -69,7 +70,19 @@ Note that the `echo = FALSE` parameter was added to the code chunk to prevent pr
 
 ## Ejercicio 3
 
-bla bla
+El modelo multinomial es como el modelo binomial pero en más dimensiones. El modelo binomial nos habla de la probabilidad de éxitos en una cantidad de intentos, y el multinomial va a agregar dimensión definiendo distintos tipos de éxitos. En el ejemplo del refugio, por ejemplo, podemos hablar de las probabilidades de que un animal sea adoptado o transferido o devuelto o liquidado.
+
+```{r multinomial}
+library(nnet)
+
+
+# por default se ordenan alfabeticamente y toma la primera como referencia
+model = multinom(desenlace ~ age_years + dog + sterilized + sexo, 
+                 data = data_refugio, trace = FALSE)
+
+probs_quick <- predict(model, type = "probs")
+summary(model)
+```
 
 
 ## Ejercicio 4
