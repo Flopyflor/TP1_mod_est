@@ -9,6 +9,9 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(ggplot2)
+library(fitdistrplus)
+library(nnet)
+
 ```
 
 ## Ejercicio 1
@@ -27,6 +30,7 @@ data_refugio$dog = as.factor(data_refugio$dog)
 data_refugio$sterilized = as.factor(data_refugio$sterilized)
 
 summary(data_refugio)
+glimpse(data_refugio)
 ```
 Observando estos resultados, vemos que tenemos una gran cantidad de datos. La distribución entre perros y gatos es bastante pareja, aunque hay un poco más de perros. La distribución de sexos es más equitativa aún. Por otro lado, la mayoría de los animales no estaban esterilizados al llegar al refugio. La edad de los animales cuando llegaron al refugio es por lo general pequeña, pero tenemos algunos casos más extremos, como el animal que entró con 24 años. Las edades se registran con números enteros, pero el tiempo de estadía está registrado con coma.
 
@@ -34,19 +38,15 @@ Respecto al desenlace, la mayoría de los animales del refugio fueron adoptados 
 
 Hay también una gran variedad de razas representadas, en total, 473 razas distintas. Solo 120 de estas razas tienen más de 100 muestras. En promedio hay 291 muestras por especie y la mediana es 22 mustras por especie. De estas especies, 400 son de perro y 73 de gato.
 
+
 ```{r razas, echo=FALSE}
 data_refugio %>%
-  summarise(cantidad = n_distinct(breed_main)) %>%
+  summarise(cantidad = n_distinct(breed_main))
 
 data_refugio %>%
   group_by(breed_main) %>%
   summarise(cantidad = n(), .groups = "drop") %>%
   filter(cantidad >= 100) %>%
-  arrange(-cantidad) 
-
-data_refugio %>%
-  group_by(breed_main) %>%
-  summarise(cantidad = n(), .groups = "drop") %>%
   arrange(-cantidad) 
 
 data_refugio %>%
@@ -60,46 +60,8 @@ data_refugio %>%
   summarise(cantidad = n_distinct(breed_main))
 ```
 
-## Ejercicio 2
 
-Franquito: en el bloque de código, r significa que es código r, y dps le ponés un titulo al bloque que ayuda dps a encontrar errores. El titulo es opcional pero no se puede repetir.
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
-
-## Ejercicio 3
-
-El modelo multinomial es como el modelo binomial pero en más dimensiones. El modelo binomial nos habla de la probabilidad de éxitos en una cantidad de intentos, y el multinomial va a agregar dimensión definiendo distintos tipos de éxitos. En el ejemplo del refugio, por ejemplo, podemos hablar de las probabilidades de que un animal sea adoptado o transferido o devuelto o liquidado.
-
-```{r multinomial}
-library(nnet)
-
-
-# por default se ordenan alfabeticamente y toma la primera como referencia
-model = multinom(desenlace ~ age_years + dog + sterilized + sexo, 
-                 data = data_refugio, trace = FALSE)
-
-probs_quick <- predict(model, type = "probs")
-summary(model)
-```
-
-
-## Ejercicio 4
-
-bla bla
-## Cargar librerías
-```{r}
-library(dplyr)
-library(ggplot2)
-library(fitdistrplus)
-```
-
-## Cargar Datos
-
-```{r}
+```{r, echo=FALSE}
 refugio <- read.csv("refugio.csv")
 ```
 
@@ -357,6 +319,39 @@ Estos resultados son consistentes con el comportamiento observado en los gráfic
 
 En conclusión, para este conjunto de datos y bajo el escenario planteado por la consigna, el estimador Empirical Bayes resulta preferible a la tasa cruda, ya que proporciona estimaciones más cercanas a la tasa verdadera cuando se dispone de una cantidad reducida de observaciones por raza.
 
+## Ejercicio 3
 
+### Inciso (a):
+
+El modelo multinomial es como el modelo binomial pero en más dimensiones. El modelo binomial nos habla de la probabilidad de éxitos en una cantidad de intentos, y el multinomial va a agregar dimensión definiendo distintos tipos de éxitos. En el ejemplo del refugio, por ejemplo, podemos hablar de las probabilidades de que un animal sea adoptado o transferido o devuelto o liquidado.
+
+### Inciso (b)
+
+Vamos a crear un modelo multinomial a partir de los datos. Vamos a poner la variable `Desenlace` como resultado de una combinación lineal de las variables `age_years`, `dog`, `sterilized` y `sexo`. Hay cuatro tipos de desenlaces, y vamos a usar `Adopción` como variable de referencia. 
+
+```{r multinomial}
+
+# por default se ordenan alfabeticamente y toma la primera como referencia
+model = multinom(desenlace ~ age_years + dog + sterilized + sexo, 
+                 data = data_refugio, trace = FALSE)
+
+probs_quick <- predict(model, type = "probs")
+summary(model)
+```
+El hecho de que `Adopción` sea la variable de referencia significa que para cada fila, estamos analizando la probabilidad de que el resultado sea la categoría de esa fila contra la probabilidad de que el resultado sea `Àdopción`, normalizado para que todas las probabilidades sumen 1.
+
+Viendo las métricas del modelo, tenemos la `Residual Deviance` y la `AIC`, que son métricas que nos permiten comparar modelos, en particular los anidados. Dos modelos son anidados si las variables predictivas de uno son un subconjunto estricto de las del otro. La Desviación nos habla de la distancia entre nuestras predicciones y los datos reales, y lo queremos minimizar. Sin embargo, solo mirar el desvío puede llevar a un sobreajuste, y un modelo completo siempre va a tener un desvío menor o igual que uno restringido. Para eso tenemos el AIC (Akaike Information Criterion), que evalua el desvío y le agrega una penalización por complejidad.
+
+### Inciso (c)
+
+Ahora analicemos los coeficientes. Los coeficientes de la fila `Devolución` representan el efecto de las variables predictoras sobre el log-odds (o el logaritmo de la razón de probabilidades) de que ocurra una `Devolución` en comparación con la categoría de referencia, `Adopción.` El coeficiente de `dog` es positivo, lo que significa que es más probable que sea devuelto si es un perro. El módulo del coeficiente nos da su peso en el resultado.
+
+Como esto es poco intuitivo, podemos ver también el factor de riesgo relativo. Se obtienen elevando $e$ a estos coeficientes. 
+
+```{r rrr, echo=FALSE}
+exp(coef(model))
+```
+
+Se interpretan de la siguiente forma: el riesgo relativo de `age_years` para Muerte es 1.27, lo que significa que cada año que le sumes a un animal multiplica la probabilidad de que el animal termine muerto en vez de adoptado por 1.27. Por otro lado, si es un perro, su probabilidad se multiplica por 0.49 con respecto a su probabilidad si fuera un gato. Eso significa que, según nuestro modelo, si tenemos un perro y un gato con la misma edad y sexo, el perro va a tener menos probabilidades de morir que el gato.
 
 
