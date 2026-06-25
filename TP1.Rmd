@@ -11,6 +11,7 @@ library(dplyr)
 library(ggplot2)
 library(fitdistrplus)
 library(nnet)
+library(survival)
 
 ```
 
@@ -90,7 +91,7 @@ refugio <- read.csv("refugio.csv")
 Para evaluar posteriormente la calidad de los estimadores, se definió como "tasa verdadera" de adopción de cada raza la proporción de animales adoptados sobre el total de animales de esa raza utilizando todo el conjunto de datos. Con el objetivo de obtener estimaciones confiables, se consideraron únicamente aquellas razas con al menos 100 observaciones, tal como indica la consigna.
 
 
-```{r}
+```{r verdad, echo=FALSE}
 verdad <- refugio %>%
   group_by(breed_main) %>%
   summarise(
@@ -108,7 +109,7 @@ head(verdad)
 Luego de aplicar el filtro de al menos 100 animales por raza, se obtuvo un conjunto de razas para las cuales la tasa de adopción puede considerarse una aproximación confiable de la probabilidad real de adopción. Estas tasas se utilizarán posteriormente como referencia ("verdad") para evaluar el desempeño de los distintos estimadores.
 
 
-```{r}
+```{r grafico_cant_animales, echo=FALSE}
 
 verdad %>%
   slice_max(n, n = 10) %>%
@@ -130,7 +131,7 @@ verdad %>%
 ```
 En la Figura 1 se observa una marcada diferencia en la cantidad de animales registrados entre las distintas razas. Las razas Domestic Shorthair Mix y Domestic Shorthair concentran una cantidad considerablemente mayor de observaciones que el resto, mientras que las demás presentan tamaños de muestra bastante menores. Esta diferencia justifica la necesidad de utilizar únicamente razas con un número suficiente de observaciones al definir la tasa verdadera.
 
-```{r}
+```{r grafico_verdad, echo=FALSE}
 verdad %>%
   slice_max(tasa_real, n = 10) %>%
   ggplot(aes(x = reorder(breed_main, tasa_real), y = tasa_real, fill = breed_main)) +
@@ -153,26 +154,26 @@ Con el objetivo de simular un escenario con información limitada, se tomó una 
 
 Fijar una semilla
 
-```{r}
+```{r semilla, echo=FALSE, results="hide"}
 set.seed(123)
 ```
 
 Elegir el tamaño de muestra
 
-```{r}
+```{r tamaño_muestra, echo=FALSE, results="hide"}
 m <- 15
 ```
 
 Quedarnos solamente con las razas del inciso (a)
 
-```{r}
+```{r seleccion_razas, echo=FALSE, results="hide"}
 muestra <- refugio %>%
   semi_join(verdad, by = "breed_main") # semi_join Simplemente elimina todas las razas que no están en verdad.
 ```
 
 Tomar 15 animales por raza
 
-```{r}
+```{r animales_por_raza, echo=FALSE, results="hide"}
 muestra <- muestra %>%
   group_by(breed_main) %>%
   slice_sample(n = m) %>%
@@ -181,7 +182,7 @@ muestra <- muestra %>%
 
 Calcular la tasa cruda
 
-```{r}
+```{r tasa_cruda, echo=FALSE}
 tasa_cruda <- muestra %>%
   group_by(breed_main) %>%
   summarise(
@@ -194,12 +195,12 @@ head(tasa_cruda)
 ```
 
 
-```{r}
+```{r comparacion_verdad_cruda, echo=FALSE, results="hide"}
 comparacion <- verdad %>%
   left_join(tasa_cruda, by = "breed_main")
 ```
 
-```{r}
+```{r grafico_comparacion_verdad_cruda, echo=FALSE}
 ggplot(comparacion,
        aes(x = tasa_real,
            y = tasa_cruda)) +
@@ -229,28 +230,27 @@ Con el objetivo de incorporar información global al proceso de estimación, se 
 
 Ajustar la distribución Beta
 
-```{r}
+```{r ajuste_beta, echo=FALSE, results="hide"}
 fit_data <- tasa_cruda %>%
   filter(tasa_cruda > 0, tasa_cruda < 1) %>%
   pull(tasa_cruda)
-```
 
-```{r}
 ajuste <- fitdist(
   fit_data,
   "beta"
 )
 ```
-```{r}
+```{r calculo_alpha_beta, echo=FALSE, results="hide"}
 alpha0 <- ajuste$estimate["shape1"]
 beta0  <- ajuste$estimate["shape2"]
 
 alpha0
 beta0
 ```
+
 Los parámetros estimados fueron $\alpha_0$=3.15 y $\beta_0$=3.44, los cuales se utilizaron como distribución prior para construir el estimador Empirical Bayes.
 
-```{r}
+```{r comparacion_EB_verdadera, echo=FALSE, results="hide"}
 comparacion <- comparacion %>%
   mutate(
     tasa_EB = (alpha0 + adoptados_muestra) /
@@ -258,7 +258,7 @@ comparacion <- comparacion %>%
   )
 ```
 
-```{r}
+```{r grafico_comparacion_EB_verdadera, echo=FALSE}
 ggplot(comparacion,
        aes(x = tasa_real,
            y = tasa_EB)) +
@@ -286,9 +286,12 @@ Aunque aún se observan diferencias entre las estimaciones y la tasa verdadera, 
 
 Para comparar objetivamente ambos estimadores se calcula el Error Cuadrático Medio (MSE), utilizando como referencia la tasa verdadera definida en el inciso (a). Esta métrica permite cuantificar, en promedio, qué tan alejadas se encuentran las estimaciones respecto del valor considerado como verdadero para cada raza.
 
-Calcular los errores
 
-```{r}
+
+```{r errores, echo=FALSE, results="hide"}
+
+# Calcular los errores
+
 comparacion <- comparacion %>%
   mutate(
     error_crudo = (tasa_cruda - tasa_real)^2,
@@ -296,9 +299,12 @@ comparacion <- comparacion %>%
   )
 ```
 
-Calcular el MSE
 
-```{r}
+
+```{r MSE, echo=FALSE}
+
+# Calcular el MSE
+
 mse_crudo <- mean(comparacion$error_crudo)
 
 mse_EB <- mean(comparacion$error_EB)
@@ -325,9 +331,12 @@ ggplot(mse_df, aes(x = Estimador, y = MSE, fill = Estimador)) +
   theme_minimal(base_size = 12)
 ```
 
-¿Por cuánto mejora?
 
-```{r}
+
+``` {r porcentaje_mejora, echo=FALSE, results="hide"}
+
+# ¿Por cuánto mejora?
+  
 mejora <- 100 * (mse_crudo - mse_EB) / mse_crudo
 
 mejora
@@ -373,4 +382,327 @@ exp(coef(model))
 
 Se interpretan de la siguiente forma: el riesgo relativo de `age_years` para `Muerte` es 1.27, lo que significa que cada año que le sumes a un animal multiplica la probabilidad de que el animal termine muerto en vez de adoptado por 1.27. Por otro lado, si es un perro (`dog1`), su probabilidad se multiplica por 0.49 con respecto a su probabilidad si fuera un gato. Eso significa que, según nuestro modelo, si tenemos un perro y un gato con la misma edad y sexo, el perro va a tener menos probabilidades de morir que el gato.
 
+
+## Ejercicio 4
+
+
+### Inciso (a):
+
+#### Curva de Kaplan-Meier
+
+Para analizar el tiempo hasta la adopción, se estimó la curva de Kaplan-Meier considerando como evento de interés la adopción del animal. Los restantes desenlaces (transferencia, devolución y muerte) fueron tratados como observaciones censuradas, ya que representan animales cuyo tiempo de adopción no pudo observarse dentro del estudio.
+
+```{r curva_Kaplan_Meier, echo=FALSE}
+evento <- refugio$desenlace == "Adopcion"
+
+tiempos <- sort(unique(refugio$los))
+
+mj <- rep(0, length(tiempos))
+nj <- rep(0, length(tiempos))
+
+for(i in 1:length(tiempos)){
+
+  t <- tiempos[i]
+
+  # eventos en ese instante (mj)
+  mj[i] <- sum(
+    refugio$los == t &
+    evento
+  )
+
+  # individuos en riesgo
+  nj[i] <- sum(
+    refugio$los >= t
+  )
+
+}
+
+cocientes <- rep(0, length(tiempos))
+
+for(i in 1:length(tiempos)){
+
+    cocientes[i] <- 1 - (mj[i]/nj[i])
+
+}
+
+S <- rep(1, length(tiempos))
+
+for(j in 1:length(tiempos)){
+
+    for(t in 1:j){
+
+        S[j] <- S[j] * cocientes[t]
+
+    }
+
+}
+
+km <- data.frame(
+    tiempo = tiempos,
+    en_riesgo = nj,
+    eventos = mj,
+    supervivencia = S
+)
+
+plot(
+    tiempos,
+    S,
+    type = "s",
+    col = "steelblue",
+    xlab = "Días",
+    ylab = "S(t)",
+    main = "Estimador de Kaplan-Meier"
+)
+
+grid()
+
+```
+
+La Figura X presenta la curva estimada de Kaplan-Meier, que representa la probabilidad de que un animal permanezca sin ser adoptado luego de un determinado número de días en el refugio. Se observa una disminución pronunciada durante los primeros días, indicando que una gran proporción de las adopciones ocurre poco tiempo después del ingreso. Posteriormente, la curva desciende de forma más gradual, lo que sugiere que los animales que permanecen durante un período prolongado tienen una probabilidad cada vez menor de ser adoptados en el corto plazo.
+
+#### Probabilidad de Adopción Estimada
+
+A partir de la curva de supervivencia se calculó la probabilidad acumulada de adopción, definida como $1 - \hat{S}(t)$, para distintos horizontes temporales. Los resultados se presentan en la Figura Y.
+
+```{r proba_acumulada_adopcion, echo=FALSE}
+prob_adopcion <- function(dia){
+
+    indice <- max(which(tiempos <= dia))
+    
+    if(length(indice) == 0){
+        return(0)
+    }
+
+    return(1 - S[indice])
+
+}
+
+dias <- c(30,60,90,180)
+
+resultado <- data.frame(
+    Dias = dias,
+    Probabilidad_Adopcion = sapply(
+        dias,
+        prob_adopcion
+    )
+)
+
+ggplot(
+  resultado,
+  aes(
+    x = factor(Dias),
+    y = Probabilidad_Adopcion,
+    fill = factor(Dias)
+  )
+) +
+  geom_col(show.legend = FALSE) +
+  geom_text(
+    aes(label = sprintf("%.3f", Probabilidad_Adopcion)),
+    vjust = -0.4,
+    size = 4
+  ) +
+  scale_fill_manual(values = c(
+  "#FDD49E",
+  "#FDAE6B",
+  "#F16913",
+  "#D94801"
+)) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  labs(
+    title = "Probabilidad acumulada de adopción",
+    x = "Días",
+    y = "Probabilidad de adopción"
+  ) +
+  theme_minimal(base_size = 12)
+```
+La probabilidad estimada de adopción alcanza aproximadamente un 55.8% a los 30 días, un 78.4% a los 60 días, un 89.1% a los 90 días y un 97.1% a los 180 días. Estos resultados indican que la mayor parte de las adopciones ocurre durante los primeros meses de permanencia en el refugio, mientras que el incremento en la probabilidad de adopción es cada vez menor a medida que transcurre el tiempo.
+
+Es importante destacar que la probabilidad estimada mediante Kaplan-Meier no coincide necesariamente con el porcentaje observado de animales adoptados, ya que los individuos cuyo desenlace fue transferencia, devolución o muerte son tratados como observaciones censuradas y continúan aportando información hasta el momento en que abandonan el estudio.
+
+
+### Inciso (b):
+
+Con el objetivo de identificar qué variables se asocian con tiempos de adopción diferentes, se estimaron curvas de Kaplan-Meier para distintos grupos de animales y se compararon mediante el test de Log-Rank. En todos los casos se consideró como evento la adopción, mientras que las transferencias, devoluciones y muertes fueron tratadas como observaciones censuradas.
+
+```{r objeto_supervivencia, echo=FALSE, results="hide"}
+
+surv_obj <- Surv(
+    time = refugio$los,
+    event = refugio$desenlace == "Adopcion"
+)
+
+```
+
+#### Comparar perros vs gatos
+
+```{r grafico_comparacion_perro_gato, fig.align='center', echo=FALSE}
+km_animal <- survfit(
+    surv_obj ~ animal_type,
+    data = refugio
+)
+
+plot(
+    km_animal,
+    col = c("steelblue","darkorange"),
+    lwd = 2,
+    xlab = "Días",
+    ylab = "S(t)",
+    main = "Kaplan-Meier según tipo de animal"
+)
+
+legend(
+    "topright",
+    legend = c("Cat","Dog"),
+    col = c("steelblue","darkorange"),
+    lwd = 2
+)
+
+
+```
+La Figura X muestra las curvas de Kaplan-Meier para perros y gatos. Se observa que la curva correspondiente a los perros desciende más rápidamente durante los primeros días de permanencia en el refugio, indicando una mayor velocidad de adopción. Sin embargo, para tiempos de permanencia más largos las curvas se aproximan y finalmente la correspondiente a los gatos queda levemente por debajo.
+
+
+```{r comparacion_perro_gato, echo=FALSE, results="hide"}
+survdiff(
+    surv_obj ~ animal_type,
+    data = refugio
+)
+```
+
+El test de Log-Rank arroja un estadístico $\chi^{2} = 915$  con un $p \leq  2 \times 10^{-16}$, por lo que se rechaza la hipótesis de igualdad entre ambas curvas. En consecuencia, existe evidencia estadísticamente significativa de que el tipo de animal está asociado con el tiempo hasta la adopción.
+
+#### Comparar machos vs hembras
+
+```{r grafico_comparacion_sexo, fig.align='center', echo=FALSE}
+km_sexo <- survfit(
+    surv_obj ~ sexo,
+    data = refugio
+)
+
+plot(
+    km_sexo,
+    col = c("deeppink","dodgerblue"),
+    lwd = 2,
+    xlab = "Días",
+    ylab = "S(t)",
+    main = "Kaplan-Meier según sexo"
+)
+
+legend(
+    "topright",
+    legend = levels(as.factor(refugio$sexo)),
+    col = c("deeppink","dodgerblue"),
+    lwd = 2
+)
+
+
+```
+
+Las curvas correspondientes a machos y hembras prácticamente se superponen durante todo el período de seguimiento, lo que sugiere que el sexo tiene un efecto muy pequeño sobre el tiempo de adopción.
+
+```{r comparacion_sexo, echo=FALSE, results="hide"}
+survdiff(
+    surv_obj ~ sexo,
+    data = refugio
+)
+```
+
+No obstante, el test de Log-Rank resulta significativo $(\ \chi^{2} = 22.3, \; p = 2 \times 10^{-6} )$. Esta significancia probablemente se explica por el gran tamaño de la muestra, que permite detectar diferencias muy pequeñas. Desde un punto de vista práctico, el efecto del sexo sobre el tiempo de adopción parece poco relevante.
+
+#### Esterilizados
+
+```{r grafico_comparacion_esterilizados, fig.align='center', echo=FALSE}
+km_est <- survfit(
+    surv_obj ~ sterilized,
+    data = refugio
+)
+
+plot(
+    km_est,
+    col = c("red","darkgreen"),
+    lwd = 2,
+    xlab = "Días",
+    ylab = "S(t)",
+    main = "Kaplan-Meier según esterilización"
+)
+
+legend(
+    "topright",
+    legend = c("No","Sí"),
+    col = c("red","darkgreen"),
+    lwd = 2
+)
+
+
+```
+
+Las curvas de Kaplan-Meier muestran que los animales que ingresan sin esterilizar presentan tiempos de adopción menores que aquellos que ya se encontraban esterilizados al ingresar al refugio.
+
+```{r comparacion_esterilizados, echo=FALSE, results="hide"}
+survdiff(
+    surv_obj ~ sterilized,
+    data = refugio
+)
+```
+
+Estas diferencias son confirmadas por el test de Log-Rank $(\ \chi^{2} = 351, \; p \leq 2 \times 10^{-16} )$, por lo que existe evidencia estadísticamente significativa de una asociación entre el estado de esterilización y el tiempo de adopción.
+
+#### Edad
+
+Para estudiar el efecto de la edad, los animales se agruparon en tres categorías: menores de un año, entre uno y cinco años y mayores de cinco años.
+
+```{r grafico_comparacion_edad, echo=FALSE, results="hide"}
+refugio$grupo_edad <- cut(
+    refugio$age_years,
+    breaks = c(0,1,5,20),
+    labels = c(
+        "Menos de 1 año",
+        "1-5 años",
+        "Más de 5 años"
+    )
+)
+
+km_edad <- survfit(
+    surv_obj ~ grupo_edad,
+    data = refugio
+)
+
+plot(
+    km_edad,
+    lwd = 2,
+    col = c("#4daf4a","#377eb8","#e41a1c"),
+    xlab = "Días",
+    ylab = "S(t)",
+    main = "Kaplan-Meier según edad"
+)
+
+legend(
+    "topright",
+    legend = levels(refugio$grupo_edad),
+    col = c("#4daf4a","#377eb8","#e41a1c"),
+    lwd = 2
+)
+
+
+
+```
+
+Las curvas muestran un patrón muy marcado. Los animales de entre uno y cinco años presentan la caída más rápida de la curva de supervivencia, lo que indica que son adoptados en menor tiempo. Los menores de un año muestran una velocidad de adopción intermedia, mientras que los animales mayores de cinco años presentan la curva más alta durante casi todo el seguimiento, siendo el grupo que permanece más tiempo en el refugio antes de ser adoptado.
+
+```{r comparacion_edad, echo=FALSE, results="hide"}
+survdiff(
+    surv_obj ~ grupo_edad,
+    data = refugio
+)
+```
+
+El test de Log-Rank confirma estas diferencias $(\ \chi^{2} = 2468, \; p \leq 2 \times 10^{-16} )$, constituyendo la asociación más fuerte observada entre todas las variables analizadas.
+
+
+#### Conclusión
+
+En conjunto, los resultados muestran que el tiempo hasta la adopción depende de varias características del animal. La edad resulta ser la variable con mayor asociación con el tiempo de adopción, seguida por el tipo de animal y el estado de esterilización. Por el contrario, aunque el sexo presenta diferencias estadísticamente significativas debido al gran tamaño de la muestra, las curvas prácticamente se superponen, por lo que su efecto práctico parece ser reducido.
 
