@@ -3,6 +3,8 @@ title: "TP - Modelado Estadístico"
 output: 
   pdf_document:
     latex_engine: xelatex
+
+
 ---
 
 ```{r setup, include=FALSE}
@@ -42,6 +44,9 @@ glimpse(data_refugio)
 Observando estos resultados, vemos que tenemos una gran cantidad de muestras (137,806). Tenemos más muestras de perros que de gatos (56,33% son perros), pero no es una diferencia significativa. La distribución de sexos es más equitativa aún (51,24%). Por otro lado, la mayoría de los animales no estaban esterilizados al llegar al refugio (79,40%). 
 
 La edad de los animales cuando llegaron al refugio es por lo general pequeña, con mediana de 1 año, y un promedio ligeramente mayor. Aún así, tenemos unos pocos casos más extremos, como el animal que entró con 24 años. Las edades se registran con números enteros, pero el tiempo de estadía está registrado con coma. La mayoría de los animales se quedaron menos de 24 días en el refugio, y el animal que se quedó más tiempo estuvo un año.
+
+
+Observando estos resultados, vemos que tenemos una gran cantidad de muestras. La distribución entre perros y gatos es bastante pareja, aunque hay un poco más de perros. La distribución de sexos es más equitativa aún. Por otro lado, la mayoría de los animales no estaban esterilizados al llegar al refugio. La edad de los animales cuando llegaron al refugio es por lo general pequeña, pero tenemos algunos casos más extremos, como el animal que entró con 24 años. Las edades se registran con números enteros, pero el tiempo de estadía está registrado con coma.
 
 Respecto al desenlace, la mayoría de los animales del refugio fueron adoptados (52.9%), el resto siendo transferido (28.5%), devuelto (14.7%), o liquidado (3.7%).
 
@@ -92,6 +97,27 @@ data_refugio %>%
 
 
 razas_representadas = data_refugio %>%
+```
+
+```{r tabla_raza_100, echo=FALSE}
+tabla_razas <- data_refugio %>%
+  group_by(breed_main) %>%
+  summarise(cantidad = n(), .groups = "drop") %>%
+  filter(cantidad >= 100) %>%
+  arrange(desc(cantidad))
+
+knitr::kable(
+  head(tabla_razas, 10),
+  caption = "Las 10 razas con mayor cantidad de animales (considerando solo razas con al menos 100 animales)"
+)
+
+cat("En total,", nrow(tabla_razas),
+    "razas poseen al menos 100 animales registrados.")
+```
+
+
+```{r cant_por_tipo, echo=FALSE, results="hide"}
+data_refugio %>%
   group_by(breed_main, animal_type) %>%
   summarise(cantidad = n(), .groups = "drop") %>%
   filter(cantidad >= 100) %>%
@@ -109,6 +135,22 @@ Podemos ver que solo 120 de 473 razas tienen más de 100 muestras, y que solo 12
 También se puede ver que, aunque sacamos más de la mitad de las razas, el dataset que nos queda sigue teniendo más de 130 mil muestras.
 
 
+```{r prueba, echo=FALSE}
+knitr::kable(
+  data_refugio %>%
+  group_by(breed_main, animal_type) %>%
+  summarise(cantidad = n(), .groups = "drop") %>%
+  filter(cantidad >= 100) %>%
+  group_by(animal_type) %>%
+  summarise(cantidad_por_tipo = n(), .groups = "drop"),
+  caption = "Cantidad de Animales x Tipo"
+)
+```
+
+
+Podemos ver que solo 120 de 473 razas tienen más de 100 muestras, y que solo 12 de ellas son gatos.
+
+
 ```{r, echo=FALSE}
 refugio <- read.csv("refugio.csv")
 ```
@@ -121,7 +163,7 @@ Ahora vamos a estimar la tasa de adopción de cada raza, y vamos a medir si el e
 ~~Para evaluar posteriormente la calidad de los estimadores,~~ Para tener una referencia a la hora de evaluar la calidad de los estimadores, se definió como "tasa verdadera" de adopción de cada raza la proporción de animales adoptados sobre el total de animales de esa raza utilizando todo el conjunto de datos. Con el objetivo de obtener estimaciones confiables, se consideraron únicamente aquellas razas con al menos 100 observaciones, tal como indica la consigna.
 
 
-```{r verdad, echo=FALSE}
+```{r verdad, echo=FALSE, results="hide"}
 verdad <- refugio %>%
   group_by(breed_main) %>%
   summarise(
@@ -131,37 +173,17 @@ verdad <- refugio %>%
     .groups = "drop"
   ) %>%
   filter(n >= 100) %>%
-  arrange(desc(n))
+  arrange(desc(tasa_real))
 
 head(verdad)
 ```
 
+
+
 Luego de aplicar el filtro de al menos 100 animales por raza, se obtuvo un conjunto de razas para las cuales la tasa de adopción puede considerarse una aproximación confiable de la probabilidad real de adopción. Estas tasas se utilizarán posteriormente como referencia ("verdad") para evaluar el desempeño de los distintos estimadores.
 
 
-```{r grafico_cant_animales, echo=FALSE}
-
-verdad %>%
-  slice_max(n, n = 10) %>%
-  ggplot(aes(
-    x = reorder(breed_main, n),
-    y = n,
-    fill = breed_main
-  )) +
-  geom_col(show.legend = FALSE) +   # también elimina la leyenda
-  coord_flip() +
-  labs(
-    title = "Razas con mayor Cantidad de Animales",
-    x = NULL,
-    y = "Cantidad de Animales"
-  ) +
-  theme_minimal()
-
-
-```
-En la Figura 1 se observa una marcada diferencia en la cantidad de animales registrados entre las distintas razas. Las razas Domestic Shorthair Mix y Domestic Shorthair concentran una cantidad considerablemente mayor de observaciones que el resto, mientras que las demás presentan tamaños de muestra bastante menores. Esta diferencia justifica la necesidad de utilizar únicamente razas con un número suficiente de observaciones al definir la tasa verdadera.
-
-```{r grafico_verdad, echo=FALSE}
+```{r grafico_verdad, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
 verdad %>%
   slice_max(tasa_real, n = 10) %>%
   ggplot(aes(x = reorder(breed_main, tasa_real), y = tasa_real, fill = breed_main)) +
@@ -176,7 +198,7 @@ verdad %>%
   theme(legend.position = "none")
 ```
 
-La Figura 2 presenta las diez razas con mayor tasa de adopción calculada sobre el conjunto completo de datos. Se observa que las tasas más altas se encuentran entre aproximadamente 0.65 y 0.75, siendo Blue Lacy Mix la raza con la mayor proporción de adopciones dentro del grupo analizado. Asimismo, las diferencias entre las primeras posiciones son relativamente pequeñas, lo que indica que varias razas presentan probabilidades de adopción similares.
+La Figura 1 presenta las diez razas con mayor tasa de adopción calculada sobre el conjunto completo de datos. Se observa que las tasas más altas se encuentran entre aproximadamente 0.65 y 0.75, siendo Blue Lacy Mix la raza con la mayor proporción de adopciones dentro del grupo analizado. Asimismo, las diferencias entre las primeras posiciones son relativamente pequeñas, lo que indica que varias razas presentan probabilidades de adopción similares.
 
 
 ### Inciso (b): 
@@ -187,34 +209,48 @@ Con el objetivo de simular un escenario con información limitada, se tomó una 
 Fijar una semilla
 
 ```{r semilla, echo=FALSE, results="hide"}
+
+#Fijar una semilla
+
 set.seed(123)
 ```
 
-Elegir el tamaño de muestra
 
 ```{r tamaño_muestra, echo=FALSE, results="hide"}
+
+# Elegir el tamaño de muestra
+
 m <- 15
 ```
 
-Quedarnos solamente con las razas del inciso (a)
+
 
 ```{r seleccion_razas, echo=FALSE, results="hide"}
+
+# Quedarnos solamente con las razas del inciso (a)
+
 muestra <- refugio %>%
   semi_join(verdad, by = "breed_main") # semi_join Simplemente elimina todas las razas que no están en verdad.
 ```
 
-Tomar 15 animales por raza
+
 
 ```{r animales_por_raza, echo=FALSE, results="hide"}
+
+# Tomar 15 animales por raza
+
 muestra <- muestra %>%
   group_by(breed_main) %>%
   slice_sample(n = m) %>%
   ungroup()
 ```
 
-Calcular la tasa cruda
 
-```{r tasa_cruda, echo=FALSE}
+
+```{r tasa_cruda, echo=FALSE, results="hide"}
+
+
+
 tasa_cruda <- muestra %>%
   group_by(breed_main) %>%
   summarise(
@@ -227,12 +263,20 @@ head(tasa_cruda)
 ```
 
 
+```{r tasa_cruda_pdf, echo=FALSE}
+knitr::kable(
+  head(tasa_cruda,5),
+  caption = "Primeras seis razas de la muestra"
+)
+```
+
+
 ```{r comparacion_verdad_cruda, echo=FALSE, results="hide"}
 comparacion <- verdad %>%
   left_join(tasa_cruda, by = "breed_main")
 ```
 
-```{r grafico_comparacion_verdad_cruda, echo=FALSE}
+```{r grafico_comparacion_verdad_cruda, echo=FALSE, fig.align='center', fig.width=4, fig.height=2}
 ggplot(comparacion,
        aes(x = tasa_real,
            y = tasa_cruda)) +
@@ -250,7 +294,7 @@ ggplot(comparacion,
   theme_minimal()
 ```
 
-La Figura 3 compara la tasa cruda obtenida a partir de la muestra con la tasa verdadera calculada utilizando la totalidad de los datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que ambas tasas coinciden exactamente.
+La Figura 2 compara la tasa cruda obtenida a partir de la muestra con la tasa verdadera calculada utilizando la totalidad de los datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que ambas tasas coinciden exactamente.
 
 Se observa que, aunque existe una tendencia positiva entre ambas variables, numerosos puntos se encuentran alejados de la recta identidad. Esto indica que la tasa cruda presenta una variabilidad considerable cuando se estima a partir de únicamente 15 observaciones por raza. En algunos casos la tasa de adopción resulta sobreestimada, mientras que en otros se subestima respecto de la tasa verdadera.
 
@@ -290,7 +334,7 @@ comparacion <- comparacion %>%
   )
 ```
 
-```{r grafico_comparacion_EB_verdadera, echo=FALSE}
+```{r grafico_comparacion_EB_verdadera, echo=FALSE, fig.align='center', fig.width=4, fig.height=2}
 ggplot(comparacion,
        aes(x = tasa_real,
            y = tasa_EB)) +
@@ -301,32 +345,18 @@ ggplot(comparacion,
     color = "red"
   ) +
   labs(
-    title = "Estimación Empirical Bayes vs. tasa verdadera",
+    title = "Estimacion Empirical Bayes vs. tasa verdadera",
     x = "Tasa verdadera",
-    y = "Estimación Empirical Bayes"
+    y = "Estimacion Empirical Bayes"
   ) +
-  theme_minimal()
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, hjust = 0.5),
+    axis.title = element_text(size = 8),
+    axis.text = element_text(size = 7)
+  )
 ```
-```{r mi_side_by_side, echo=FALSE}
-ggplot(comparacion,) +
-  geom_point(aes(x = tasa_real,
-           y = tasa_cruda)) +
-  geom_point(aes(x = tasa_real,
-           y = tasa_EB), alpha = 0.6, size = 2, color='blue') +
-  geom_abline(
-      slope = 1,
-      intercept = 0,
-      color = "red"
-  ) +
-  labs(
-    title = "Tasa cruda vs. tasa verdadera",
-      x = "Tasa verdadera",
-      y = "Tasa cruda"
-  ) +
-  theme_minimal()
-
-```
-La Figura 4 compara las estimaciones obtenidas mediante el método Empirical Bayes con la tasa verdadera de adopción calculada utilizando el conjunto completo de datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que la estimación coincide exactamente con la tasa verdadera.
+La Figura 3 compara las estimaciones obtenidas mediante el método Empirical Bayes con la tasa verdadera de adopción calculada utilizando el conjunto completo de datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que la estimación coincide exactamente con la tasa verdadera.
 
 Se observa una relación positiva entre ambas variables, ya que las estimaciones Empirical Bayes tienden a seguir la tendencia de las tasas verdaderas. La mayoría de las observaciones se concentra alrededor de la recta identidad, lo que indica que el estimador logra aproximar adecuadamente la tasa de adopción de cada raza aun cuando se dispone únicamente de una muestra reducida de animales.
 
@@ -352,7 +382,7 @@ comparacion <- comparacion %>%
 
 
 
-```{r MSE, echo=FALSE}
+```{r MSE, echo=FALSE, fig.align='center', fig.width=4, fig.height=2}
 
 # Calcular el MSE
 
@@ -375,11 +405,16 @@ ggplot(mse_df, aes(x = Estimador, y = MSE, fill = Estimador)) +
     limits = c(0, max(mse_df$MSE) * 1.15)
   ) +
   labs(
-    title = "Comparación del Error Cuadrático Medio",
+    title = "Comparacion del Error Cuadratico Medio",
     x = NULL,
-    y = "Error Cuadrático Medio (MSE)"
+    y = "Error Cuadratico Medio (MSE)"
   ) +
-  theme_minimal(base_size = 12)
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 9, hjust = 0.5),
+    axis.title.y = element_text(size = 8),
+    axis.text = element_text(size = 7)
+  )
 ```
 
 
@@ -392,7 +427,7 @@ mejora <- 100 * (mse_crudo - mse_EB) / mse_crudo
 
 mejora
 ```
-La Figura 5 muestra que el estimador Empirical Bayes obtuvo un MSE de 0.0089, frente a 0.0150 para la tasa cruda. Esto representa una reducción del 40.7% en el error cuadrático medio, indicando que, en promedio, las estimaciones obtenidas mediante Empirical Bayes se encuentran considerablemente más próximas a la tasa verdadera.
+La Figura 4 muestra que el estimador Empirical Bayes obtuvo un MSE de 0.0089, frente a 0.0150 para la tasa cruda. Esto representa una reducción del 40.7% en el error cuadrático medio, indicando que, en promedio, las estimaciones obtenidas mediante Empirical Bayes se encuentran considerablemente más próximas a la tasa verdadera.
 
 Estos resultados son consistentes con el comportamiento observado en los gráficos de los incisos anteriores. Mientras que la tasa cruda depende exclusivamente de los 15 animales seleccionados para cada raza y, por lo tanto, puede verse fuertemente afectada por la variabilidad muestral, el estimador Empirical Bayes incorpora además la información global contenida en la distribución prior. Como consecuencia, las estimaciones extremas son suavizadas hacia el promedio general, reduciendo la influencia del azar y produciendo estimaciones más estables.
 
@@ -443,7 +478,7 @@ Se interpretan de la siguiente forma: el riesgo relativo de `age_years` para `Mu
 
 Para analizar el tiempo hasta la adopción, se estimó la curva de Kaplan-Meier considerando como evento de interés la adopción del animal. Los restantes desenlaces (transferencia, devolución y muerte) fueron tratados como observaciones censuradas, ya que representan animales cuyo tiempo de adopción no pudo observarse dentro del estudio.
 
-```{r curva_Kaplan_Meier, echo=FALSE}
+```{r curva_Kaplan_Meier, echo=FALSE, fig.align='center', fig.width=5, fig.height=3}
 evento <- refugio$desenlace == "Adopcion"
 
 tiempos <- sort(unique(refugio$los))
@@ -500,7 +535,7 @@ plot(
     S,
     type = "s",
     col = "steelblue",
-    xlab = "Días",
+    xlab = "Dias",
     ylab = "S(t)",
     main = "Estimador de Kaplan-Meier"
 )
@@ -509,13 +544,13 @@ grid()
 
 ```
 
-La Figura X presenta la curva estimada de Kaplan-Meier, que representa la probabilidad de que un animal permanezca sin ser adoptado luego de un determinado número de días en el refugio. Se observa una disminución pronunciada durante los primeros días, indicando que una gran proporción de las adopciones ocurre poco tiempo después del ingreso. Posteriormente, la curva desciende de forma más gradual, lo que sugiere que los animales que permanecen durante un período prolongado tienen una probabilidad cada vez menor de ser adoptados en el corto plazo.
+La Figura 5 presenta la curva estimada de Kaplan-Meier, que representa la probabilidad de que un animal permanezca sin ser adoptado luego de un determinado número de días en el refugio. Se observa una disminución pronunciada durante los primeros días, indicando que una gran proporción de las adopciones ocurre poco tiempo después del ingreso. Posteriormente, la curva desciende de forma más gradual, lo que sugiere que los animales que permanecen durante un período prolongado tienen una probabilidad cada vez menor de ser adoptados en el corto plazo.
 
 #### Probabilidad de Adopción Estimada
 
-A partir de la curva de supervivencia se calculó la probabilidad acumulada de adopción, definida como $1 - \hat{S}(t)$, para distintos horizontes temporales. Los resultados se presentan en la Figura Y.
+A partir de la curva de supervivencia se calculó la probabilidad acumulada de adopción, definida como $1 - \hat{S}(t)$, para distintos horizontes temporales. Los resultados se presentan en la Figura 6.
 
-```{r proba_acumulada_adopcion, echo=FALSE}
+```{r proba_acumulada_adopcion, echo=FALSE, fig.align='center', fig.width=4, fig.height=2}
 prob_adopcion <- function(dia){
 
     indice <- max(which(tiempos <= dia))
@@ -563,11 +598,16 @@ ggplot(
     labels = scales::percent
   ) +
   labs(
-    title = "Probabilidad acumulada de adopción",
-    x = "Días",
-    y = "Probabilidad de adopción"
+    title = "Probabilidad acumulada de adopcion",
+    x = "Dias",
+    y = "Probabilidad de adopcion"
   ) +
-  theme_minimal(base_size = 12)
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 9, hjust = 0.5),
+    axis.title.y = element_text(size = 8),
+    axis.text = element_text(size = 7)
+  )
 ```
 La probabilidad estimada de adopción alcanza aproximadamente un 55.8% a los 30 días, un 78.4% a los 60 días, un 89.1% a los 90 días y un 97.1% a los 180 días. Estos resultados indican que la mayor parte de las adopciones ocurre durante los primeros meses de permanencia en el refugio, mientras que el incremento en la probabilidad de adopción es cada vez menor a medida que transcurre el tiempo.
 
@@ -589,7 +629,7 @@ surv_obj <- Surv(
 
 #### Comparar perros vs gatos
 
-```{r grafico_comparacion_perro_gato, fig.align='center', echo=FALSE}
+```{r grafico_comparacion_perro_gato, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
 km_animal <- survfit(
     surv_obj ~ animal_type,
     data = refugio
@@ -599,9 +639,9 @@ plot(
     km_animal,
     col = c("steelblue","darkorange"),
     lwd = 2,
-    xlab = "Días",
+    xlab = "Dias",
     ylab = "S(t)",
-    main = "Kaplan-Meier según tipo de animal"
+    main = "Kaplan-Meier segun tipo de animal"
 )
 
 legend(
@@ -613,7 +653,7 @@ legend(
 
 
 ```
-La Figura X muestra las curvas de Kaplan-Meier para perros y gatos. Se observa que la curva correspondiente a los perros desciende más rápidamente durante los primeros días de permanencia en el refugio, indicando una mayor velocidad de adopción. Sin embargo, para tiempos de permanencia más largos las curvas se aproximan y finalmente la correspondiente a los gatos queda levemente por debajo.
+La Figura 7 muestra las curvas de Kaplan-Meier para perros y gatos. Se observa que la curva correspondiente a los perros desciende más rápidamente durante los primeros días de permanencia en el refugio, indicando una mayor velocidad de adopción. Sin embargo, para tiempos de permanencia más largos las curvas se aproximan y finalmente la correspondiente a los gatos queda levemente por debajo.
 
 
 ```{r comparacion_perro_gato, echo=FALSE, results="hide"}
@@ -627,7 +667,7 @@ El test de Log-Rank arroja un estadístico $\chi^{2} = 915$  con un $p \leq  2 \
 
 #### Comparar machos vs hembras
 
-```{r grafico_comparacion_sexo, fig.align='center', echo=FALSE}
+```{r grafico_comparacion_sexo, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
 km_sexo <- survfit(
     surv_obj ~ sexo,
     data = refugio
@@ -637,9 +677,9 @@ plot(
     km_sexo,
     col = c("deeppink","dodgerblue"),
     lwd = 2,
-    xlab = "Días",
+    xlab = "Dias",
     ylab = "S(t)",
-    main = "Kaplan-Meier según sexo"
+    main = "Kaplan-Meier segun sexo"
 )
 
 legend(
@@ -665,7 +705,7 @@ No obstante, el test de Log-Rank resulta significativo $(\ \chi^{2} = 22.3, \; p
 
 #### Esterilizados
 
-```{r grafico_comparacion_esterilizados, fig.align='center', echo=FALSE}
+```{r grafico_comparacion_esterilizados, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
 km_est <- survfit(
     surv_obj ~ sterilized,
     data = refugio
@@ -675,14 +715,14 @@ plot(
     km_est,
     col = c("red","darkgreen"),
     lwd = 2,
-    xlab = "Días",
+    xlab = "Dias",
     ylab = "S(t)",
-    main = "Kaplan-Meier según esterilización"
+    main = "Kaplan-Meier segun esterilizacion"
 )
 
 legend(
     "topright",
-    legend = c("No","Sí"),
+    legend = c("No","Si"),
     col = c("red","darkgreen"),
     lwd = 2
 )
@@ -705,14 +745,14 @@ Estas diferencias son confirmadas por el test de Log-Rank $(\ \chi^{2} = 351, \;
 
 Para estudiar el efecto de la edad, los animales se agruparon en tres categorías: menores de un año, entre uno y cinco años y mayores de cinco años.
 
-```{r grafico_comparacion_edad, echo=FALSE, results="hide"}
+```{r grafico_comparacion_edad, echo=FALSE, results="hide",fig.align='center', fig.width=5, fig.height=3}
 refugio$grupo_edad <- cut(
     refugio$age_years,
     breaks = c(0,1,5,20),
     labels = c(
-        "Menos de 1 año",
-        "1-5 años",
-        "Más de 5 años"
+        "Menos de 1 anio",
+        "1-5 anios",
+        "Mas de 5 anios"
     )
 )
 
@@ -725,9 +765,9 @@ plot(
     km_edad,
     lwd = 2,
     col = c("#4daf4a","#377eb8","#e41a1c"),
-    xlab = "Días",
+    xlab = "Dias",
     ylab = "S(t)",
-    main = "Kaplan-Meier según edad"
+    main = "Kaplan-Meier segun edad"
 )
 
 legend(
