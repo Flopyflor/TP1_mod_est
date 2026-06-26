@@ -95,8 +95,6 @@ data_refugio %>%
   filter(Cantidad >= 100) %>%
   arrange(-Cantidad)
 
-
-razas_representadas = data_refugio %>%
 ```
 
 ```{r tabla_raza_100, echo=FALSE}
@@ -117,7 +115,8 @@ cat("En total,", nrow(tabla_razas),
 
 
 ```{r cant_por_tipo, echo=FALSE, results="hide"}
-data_refugio %>%
+
+razas_representadas = data_refugio %>%
   group_by(breed_main, animal_type) %>%
   summarise(cantidad = n(), .groups = "drop") %>%
   filter(cantidad >= 100) %>%
