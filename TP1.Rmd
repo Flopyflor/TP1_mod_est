@@ -1,5 +1,8 @@
 ---
 title: "TP - Modelado Estadístico"
+author: |
+  Allami Florencia - Vanotti Franco
+
 output: 
   pdf_document:
     latex_engine: xelatex
