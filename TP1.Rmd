@@ -24,7 +24,7 @@ library(knitr)
 Empezamos cargando los datos y observando algunas sus métricas básicas y la distribución de sus atributos:
 
 
-```{r summary_data, echo=FALSE, results='asis'}
+```{r summary_data, echo=FALSE}
 data_refugio <- read.csv("./refugio.csv")
 
 data_refugio$animal_type = as.factor(data_refugio$animal_type)
@@ -35,9 +35,7 @@ data_refugio$dog = as.factor(data_refugio$dog)
 data_refugio$sterilized = as.factor(data_refugio$sterilized)
 
 
-cat("\\footnotesize\n")
 summary(data_refugio)
-cat("\\normalsize\n")
 ```
 
 Observando estos resultados, vemos que tenemos una gran cantidad de muestras (137,806). Tenemos más muestras de perros que de gatos (56,33% son perros), pero no es una diferencia significativa. La distribución de sexos es más equitativa aún (51,24%). Por otro lado, la mayoría de los animales no estaban esterilizados al llegar al refugio (79,40%). 
@@ -90,8 +88,8 @@ tabla_razas <- data_refugio %>%
   arrange(-cantidad)
 
 knitr::kable(
-  head(tabla_razas, 10),
-  caption = "Las 10 razas con mayor cantidad de animales (considerando solo razas con al menos 100 animales)",
+  head(tabla_razas, 5),
+  caption = "Las 5 razas con mayor cantidad de animales",
   align = c("l", "r", "r", "r"),
   col.names = c("Raza Principal", "Cantidad", "Porcentaje del Total", "Porcentaje del Corte")
 )
