@@ -24,7 +24,7 @@ library(knitr)
 Empezamos cargando los datos y observando algunas sus métricas básicas y la distribución de sus atributos:
 
 
-```{r summary_data, echo=FALSE}
+```{r summary_data, echo=FALSE, results='asis'}
 data_refugio <- read.csv("./refugio.csv")
 
 data_refugio$animal_type = as.factor(data_refugio$animal_type)
@@ -34,7 +34,10 @@ data_refugio$desenlace = as.factor(data_refugio$desenlace)
 data_refugio$dog = as.factor(data_refugio$dog)
 data_refugio$sterilized = as.factor(data_refugio$sterilized)
 
+
+cat("\\footnotesize\n")
 summary(data_refugio)
+cat("\\normalsize\n")
 ```
 
 Observando estos resultados, vemos que tenemos una gran cantidad de muestras (137,806). Tenemos más muestras de perros que de gatos (56,33% son perros), pero no es una diferencia significativa. La distribución de sexos es más equitativa aún (51,24%). Por otro lado, la mayoría de los animales no estaban esterilizados al llegar al refugio (79,40%). 
@@ -125,8 +128,7 @@ También notamos que, aunque sacamos más de la mitad de las razas, el dataset q
 Ahora vamos a estimar la tasa de adopción de cada raza, y vamos a medir si el estimador bayesiano empírico es más efectivo que el estimador de máxima verosimilitud
 
 ### Inciso (a): 
-~~Para evaluar posteriormente la calidad de los estimadores,~~ Para tener una referencia a la hora de evaluar la calidad de los estimadores, se definió como "tasa verdadera" de adopción de cada raza la proporción de animales adoptados sobre el total de animales de esa raza utilizando todo el conjunto de datos. Con el objetivo de obtener estimaciones confiables, se consideraron únicamente aquellas razas con al menos 100 observaciones, tal como indica la consigna.
-
+Con el fin de disponer de una referencia para evaluar la calidad de los estimadores, se definió como "tasa verdadera" de adopción de cada raza la proporción de animales adoptados sobre el total de animales de esa raza, calculada a partir del conjunto de datos completo. Siguiendo lo indicado en la consigna, se incluyeron únicamente las razas con al menos 100 observaciones, a fin de garantizar estimaciones confiables.
 
 ```{r verdad, echo=FALSE, results="hide"}
 refugio <- read.csv("refugio.csv")
@@ -146,7 +148,7 @@ head(verdad)
 ```
 
 
-Luego de aplicar el filtro de al menos 100 animales por raza, se obtuvo un conjunto de razas para las cuales la tasa de adopción puede considerarse una aproximación confiable de la probabilidad real de adopción. Estas tasas se utilizarán posteriormente como referencia ("verdad") para evaluar el desempeño de los distintos estimadores.
+Luego de aplicar el filtro de al menos 100 animales por raza, se obtuvo un conjunto de razas para las cuales la proporción de adopciones calculada puede considerarse una aproximación confiable de la probabilidad real de adopción. Estas proporciones se utilizarán en el resto del trabajo como valores de referencia (o "verdad") para evaluar el desempeño de los distintos estimadores.
 
 ```{r grafico_verdad, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
 verdad %>%
@@ -163,11 +165,12 @@ verdad %>%
   theme(legend.position = "none")
 ```
 
-La Figura 1 presenta las diez razas con mayor tasa de adopción calculada sobre el conjunto completo de datos. Se observa que las tasas más altas se encuentran entre aproximadamente 0.65 y 0.75, siendo Blue Lacy Mix la raza con la mayor proporción de adopciones dentro del grupo analizado. Asimismo, las diferencias entre las primeras posiciones son relativamente pequeñas, lo que indica que varias razas presentan probabilidades de adopción similares.
+La Figura 1 presenta las diez razas con mayor tasa de adopción estimada utilizando el conjunto completo de datos. Se observa que las tasas más altas se encuentran entre aproximadamente 0.65 y 0.75,  destacándose Blue Lacy Mix como la raza con la mayor proporción de adopciones. Además, las diferencias entre las primeras posiciones son pequeñas, lo que evidencia que varias de estas razas presentan probabilidades de adopción similares.
 
 
-### Inciso (b): 
-Con el objetivo de simular un escenario con información limitada, se tomó una muestra aleatoria de m=15 animales para cada una de las razas consideradas en el inciso anterior. A partir de estas muestras se calculó la tasa cruda de adopción, definida como la proporción de animales adoptados dentro de cada muestra. Esta estimación representa la aproximación que se obtendría si solo se dispusiera de una cantidad reducida de observaciones por raza.
+### Inciso (b):
+
+Para cada una de las razas seleccionadas en el inciso anterior se extrajo una muestra aleatoria de m=15 animales y se calculó la correspondiente tasa cruda de adopción. La Tabla 2 presenta las estimaciones obtenidas para cada raza.
 
 
 ```{r semilla, echo=FALSE, results="hide"}
@@ -259,17 +262,15 @@ ggplot(comparacion,
   theme_minimal()
 ```
 
-La Figura 2 compara la tasa cruda obtenida a partir de la muestra con la tasa verdadera calculada utilizando la totalidad de los datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que ambas tasas coinciden exactamente.
+La Figura 2 compara la tasa cruda obtenida a partir de la muestra con la tasa verdadera calculada utilizando el conjunto completo de datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que ambas tasas coinciden exactamente.
 
-Se observa que, aunque existe una tendencia positiva entre ambas variables, numerosos puntos se encuentran alejados de la recta identidad. Esto indica que la tasa cruda presenta una variabilidad considerable cuando se estima a partir de únicamente 15 observaciones por raza. En algunos casos la tasa de adopción resulta sobreestimada, mientras que en otros se subestima respecto de la tasa verdadera.
+Se observa una asociación positiva entre ambas tasas; sin embargo, varios puntos se encuentran alejados de la recta identidad. Esto evidencia la elevada variabilidad de la tasa cruda cuando se estima a partir de solo 15 observaciones por raza, dando lugar tanto a sobreestimaciones como a subestimaciones de la tasa verdadera. Este comportamiento es esperable debido al reducido tamaño muestral, que incrementa la incertidumbre de las estimaciones.
 
-Este comportamiento era esperable, ya que el tamaño muestral reducido incrementa la variabilidad de las estimaciones. En el siguiente inciso se evaluará si el estimador Empirical Bayes permite reducir este error incorporando información proveniente del conjunto completo de razas.
-
+En el siguiente inciso se analizará si el estimador Empirical Bayes permite reducir esta variabilidad mediante la incorporación de información proveniente del conjunto de razas.
 
 ### Inciso (c): 
-Con el objetivo de incorporar información global al proceso de estimación, se ajustó una distribución Beta a las tasas muestrales obtenidas en el inciso anterior mediante máxima verosimilitud.
 
-Ajustar la distribución Beta
+Como paso previo a la construcción del estimador Empirical Bayes, se ajustó una distribución Beta a las tasas de adopción observadas para las distintas razas mediante el método de máxima verosimilitud. Los parámetros de la distribución ajustada se utilizarán como distribución a priori en los incisos siguientes.
 
 ```{r ajuste_beta, echo=FALSE, results="hide"}
 fit_data <- tasa_cruda %>%
@@ -289,7 +290,7 @@ alpha0
 beta0
 ```
 
-Los parámetros estimados fueron $\alpha_0$=3.15 y $\beta_0$=3.44, los cuales se utilizaron como distribución prior para construir el estimador Empirical Bayes.
+El ajuste arrojó las estimaciones $\alpha_0$=3.15 y $\beta_0$=3.44.
 
 ```{r comparacion_EB_verdadera, echo=FALSE, results="hide"}
 comparacion <- comparacion %>%
@@ -322,16 +323,17 @@ ggplot(comparacion) +
     axis.text = element_text(size = 7)
   )
 ```
-La Figura 3 compara las estimaciones obtenidas mediante el método Empirical Bayes con la tasa verdadera de adopción calculada utilizando el conjunto completo de datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que la estimación coincide exactamente con la tasa verdadera. Los estimadores bayesianos son los puntos negros, y para comparar con el gráfico anterios, se mantuvieron los estimadores crudos en azul.
 
-Se observa una relación positiva entre ambas variables, ya que las estimaciones Empirical Bayes tienden a seguir la tendencia de las tasas verdaderas. La mayoría de las observaciones se concentra alrededor de la recta identidad, lo que indica que el estimador logra aproximar adecuadamente la tasa de adopción de cada raza aun cuando se dispone únicamente de una muestra reducida de animales.
+La Figura 3 compara las estimaciones obtenidas mediante el método Empirical Bayes (puntos negros) y las tasas crudas (puntos azules) con la tasa verdadera de adopción calculada utilizando el conjunto completo de datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que la estimación coincide exactamente con la tasa verdadera.
 
-Aunque aún se observan diferencias entre las estimaciones y la tasa verdadera, el efecto de contracción (shrinkage) propio del enfoque Empirical Bayes reduce la influencia de las fluctuaciones aleatorias presentes en las muestras pequeñas. En el siguiente inciso se cuantificará este comportamiento mediante el cálculo del error cuadrático medio (MSE), comparando el desempeño del estimador Empirical Bayes con el de la tasa cruda.
+Se observa que ambos estimadores presentan una relación positiva con la tasa verdadera; sin embargo, las estimaciones obtenidas mediante Empirical Bayes se encuentran, en general, más próximas a la recta identidad que las tasas crudas. En cambio, estas últimas exhiben una dispersión considerablemente mayor, reflejando la elevada variabilidad asociada al reducido tamaño muestral. Asimismo, puede observarse que las estimaciones Empirical Bayes tienden a desplazarse hacia el promedio global de las tasas de adopción, suavizando las sobreestimaciones y subestimaciones extremas que presentan las tasas crudas.
+
+Este comportamiento se explica por el efecto de contracción (shrinkage) característico del enfoque Empirical Bayes, que incorpora información proveniente del conjunto de razas y atenúa las fluctuaciones aleatorias presentes en las muestras pequeñas. Como consecuencia, las estimaciones resultan más estables y, visualmente, muestran una mejor aproximación a la tasa verdadera que las tasas crudas. En el siguiente inciso se cuantificará esta diferencia mediante el cálculo del error cuadrático medio (MSE) para ambos estimadores.
 
 
 ### Inciso (d):
 
-Para comparar objetivamente ambos estimadores se calcula el Error Cuadrático Medio (MSE), utilizando como referencia la tasa verdadera definida en el inciso (a). Esta métrica permite cuantificar, en promedio, qué tan alejadas se encuentran las estimaciones respecto del valor considerado como verdadero para cada raza.
+Para comparar objetivamente ambos estimadores, se calculó el Error Cuadrático Medio (MSE) utilizando como referencia la tasa verdadera definida en el inciso (a). Esta métrica cuantifica, en promedio, la diferencia entre las estimaciones y el valor considerado como verdadero para cada raza.
 
 
 
@@ -348,7 +350,7 @@ comparacion <- comparacion %>%
 
 
 
-```{r MSE, echo=FALSE, fig.align='center', fig.width=4, fig.height=2}
+```{r MSE, echo=FALSE, results='asis'}
 
 # Calcular el MSE
 
@@ -361,26 +363,14 @@ mse_df <- data.frame(
   MSE = c(mse_crudo, mse_EB)
 )
 
-ggplot(mse_df, aes(x = Estimador, y = MSE, fill = Estimador)) +
-  geom_col(width = 0.6, show.legend = FALSE) +
-  geom_text(aes(label = sprintf("%.4f", MSE)),
-            vjust = -0.5,
-            size = 5) +
-  scale_fill_manual(values = c("#5DA5DA", "#60BD68")) +
-  scale_y_continuous(
-    limits = c(0, max(mse_df$MSE) * 1.15)
-  ) +
-  labs(
-    title = "Comparacion del Error Cuadratico Medio",
-    x = NULL,
-    y = "Error Cuadratico Medio (MSE)"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(size = 9, hjust = 0.5),
-    axis.title.y = element_text(size = 8),
-    axis.text = element_text(size = 7)
-  )
+mse_df$MSE <- sprintf("%.4f", mse_df$MSE)
+
+knitr::kable(
+  mse_df,
+  caption = "Comparación del Error Cuadrático Medio (MSE)",
+  align = c("l", "c")
+)
+
 ```
 
 
@@ -393,11 +383,12 @@ mejora <- 100 * (mse_crudo - mse_EB) / mse_crudo
 
 mejora
 ```
-La Figura 4 muestra que el estimador Empirical Bayes obtuvo un MSE de 0.0089, frente a 0.0150 para la tasa cruda. Esto representa una reducción del 40.7% en el error cuadrático medio, indicando que, en promedio, las estimaciones obtenidas mediante Empirical Bayes se encuentran considerablemente más próximas a la tasa verdadera.
 
-Estos resultados son consistentes con el comportamiento observado en los gráficos de los incisos anteriores. Mientras que la tasa cruda depende exclusivamente de los 15 animales seleccionados para cada raza y, por lo tanto, puede verse fuertemente afectada por la variabilidad muestral, el estimador Empirical Bayes incorpora además la información global contenida en la distribución prior. Como consecuencia, las estimaciones extremas son suavizadas hacia el promedio general, reduciendo la influencia del azar y produciendo estimaciones más estables.
+La Tabla 3 muestra que el estimador Empirical Bayes obtuvo un MSE de 0.0089, frente a 0.0150 para la tasa cruda. Esto representa una reducción del 40.7 % en el error cuadrático medio, indicando que, en promedio, las estimaciones obtenidas mediante Empirical Bayes se encuentran considerablemente más próximas a la tasa verdadera.
 
-En conclusión, para este conjunto de datos y bajo el escenario planteado por la consigna, el estimador Empirical Bayes resulta preferible a la tasa cruda, ya que proporciona estimaciones más cercanas a la tasa verdadera cuando se dispone de una cantidad reducida de observaciones por raza.
+Estos resultados son consistentes con las observaciones realizadas en el inciso anterior. Mientras que la tasa cruda se basa exclusivamente en los 15 animales muestreados para cada raza y, por lo tanto, presenta una mayor variabilidad, el estimador Empirical Bayes incorpora información proveniente del conjunto de razas mediante la distribución a priori, lo que produce estimaciones más estables y reduce el error de estimación.
+
+En conclusión, para este conjunto de datos y bajo el escenario planteado en la consigna, el estimador Empirical Bayes supera a la tasa cruda en términos de precisión, al proporcionar estimaciones sistemáticamente más cercanas a la tasa verdadera cuando el tamaño muestral por raza es reducido.
 
 ## Ejercicio 3
 
@@ -409,14 +400,20 @@ Ahora vamos a trabajar con el modelo multinomial. El modelo multinomial es como 
 
 Vamos a crear un modelo multinomial a partir de los datos. Vamos a poner la variable `Desenlace` como resultado de una combinación lineal de las variables `age_years`, `dog`, `sterilized` y `sexo`. Hay cuatro tipos de desenlaces, y vamos a usar `Adopción` como variable de referencia. 
 
-```{r multinomial, echo=FALSE}
+```{r multinomial, echo=FALSE, results='asis'}
 
 # por default se ordenan alfabeticamente y toma la primera como referencia
 model = multinom(desenlace ~ age_years + dog + sterilized + sexo, 
                  data = data_refugio, trace = FALSE)
 
 probs_quick <- predict(model, type = "probs")
+
+
+
+cat("\\footnotesize\n")
 summary(model)
+cat("\\normalsize\n")
+
 ```
 El hecho de que `Adopción` sea la variable de referencia significa que para cada fila, estamos analizando la probabilidad de que el resultado sea la categoría de esa fila contra la probabilidad de que el resultado sea `Adopción`, normalizado para que todas las probabilidades sumen 1.
 
@@ -442,7 +439,7 @@ Se interpretan de la siguiente forma: el riesgo relativo de `age_years` para `Mu
 
 #### Curva de Kaplan-Meier
 
-Para analizar el tiempo hasta la adopción, se estimó la curva de Kaplan-Meier considerando como evento de interés la adopción del animal. Los restantes desenlaces (transferencia, devolución y muerte) fueron tratados como observaciones censuradas, ya que representan animales cuyo tiempo de adopción no pudo observarse dentro del estudio.
+Para analizar el tiempo hasta la adopción, se estimó la curva de Kaplan-Meier considerando como evento de interés la adopción del animal. Los restantes desenlaces (transferencia, devolución y muerte) fueron tratados como observaciones censuradas, ya que en esos casos el evento de adopción no fue observado durante el período de seguimiento.
 
 ```{r curva_Kaplan_Meier, echo=FALSE, fig.align='center', fig.width=5, fig.height=3}
 evento <- refugio$desenlace == "Adopcion"
@@ -510,11 +507,11 @@ grid()
 
 ```
 
-La Figura 5 presenta la curva estimada de Kaplan-Meier, que representa la probabilidad de que un animal permanezca sin ser adoptado luego de un determinado número de días en el refugio. Se observa una disminución pronunciada durante los primeros días, indicando que una gran proporción de las adopciones ocurre poco tiempo después del ingreso. Posteriormente, la curva desciende de forma más gradual, lo que sugiere que los animales que permanecen durante un período prolongado tienen una probabilidad cada vez menor de ser adoptados en el corto plazo.
+La Figura 5 presenta la curva de Kaplan-Meier estimada, que representa la probabilidad de que un animal permanezca sin ser adoptado después de un determinado número de días desde su ingreso al refugio. Se observa una disminución pronunciada durante los primeros días, lo que indica que una proporción importante de las adopciones ocurre poco tiempo después del ingreso. Posteriormente, la curva desciende de manera más gradual, reflejando que, a medida que transcurre el tiempo, la probabilidad de permanecer sin ser adoptado disminuye a un ritmo menor.
 
 #### Probabilidad de Adopción Estimada
 
-A partir de la curva de supervivencia se calculó la probabilidad acumulada de adopción, definida como $1 - \hat{S}(t)$, para distintos horizontes temporales. Los resultados se presentan en la Figura 6.
+A partir de la curva de supervivencia estimada se calculó la probabilidad acumulada de adopción, definida como $1 - \hat{S}(t)$, para distintos horizontes temporales. Los resultados se presentan en la Figura 6.
 
 ```{r proba_acumulada_adopcion, echo=FALSE, fig.align='center', fig.width=4, fig.height=2}
 prob_adopcion <- function(dia){
@@ -560,7 +557,7 @@ ggplot(
   "#D94801"
 )) +
   scale_y_continuous(
-    limits = c(0, 1),
+    limits = c(0, 1.08),
     labels = scales::percent
   ) +
   labs(
@@ -575,9 +572,10 @@ ggplot(
     axis.text = element_text(size = 7)
   )
 ```
-La probabilidad estimada de adopción alcanza aproximadamente un 55.8% a los 30 días, un 78.4% a los 60 días, un 89.1% a los 90 días y un 97.1% a los 180 días. Estos resultados indican que la mayor parte de las adopciones ocurre durante los primeros meses de permanencia en el refugio, mientras que el incremento en la probabilidad de adopción es cada vez menor a medida que transcurre el tiempo.
 
-Es importante destacar que la probabilidad estimada mediante Kaplan-Meier no coincide necesariamente con el porcentaje observado de animales adoptados, ya que los individuos cuyo desenlace fue transferencia, devolución o muerte son tratados como observaciones censuradas y continúan aportando información hasta el momento en que abandonan el estudio.
+La probabilidad estimada de adopción es de aproximadamente 55.8 % a los 30 días, 78.4 % a los 60 días, 89.1 % a los 90 días y 97.1 % a los 180 días. Estos resultados muestran que la mayor parte de las adopciones ocurre durante los primeros meses de permanencia en el refugio. A partir de ese momento, la probabilidad acumulada continúa aumentando, aunque a un ritmo cada vez menor.
+
+Es importante destacar que la probabilidad estimada mediante Kaplan-Meier no coincide necesariamente con la proporción observada de animales adoptados. Esto se debe a que los individuos cuyo desenlace fue transferencia, devolución o muerte se consideran observaciones censuradas y contribuyen al conjunto en riesgo hasta el momento en que son censurados, en lugar de ser tratados como casos que nunca experimentan el evento de interés.
 
 
 ### Inciso (b):
@@ -619,7 +617,8 @@ legend(
 
 
 ```
-La Figura 7 muestra las curvas de Kaplan-Meier para perros y gatos. Se observa que la curva correspondiente a los perros desciende más rápidamente durante los primeros días de permanencia en el refugio, indicando una mayor velocidad de adopción. Sin embargo, para tiempos de permanencia más largos las curvas se aproximan y finalmente la correspondiente a los gatos queda levemente por debajo.
+
+La Figura 7 presenta las curvas de Kaplan-Meier para perros y gatos. Se observa que la curva correspondiente a los perros desciende más rápidamente durante los primeros días de permanencia en el refugio, lo que indica que estos animales tienden a ser adoptados en menor tiempo que los gatos. A medida que transcurren los días, las curvas se aproximan y, para tiempos de permanencia más prolongados, la correspondiente a los gatos queda levemente por debajo de la de los perros.
 
 
 ```{r comparacion_perro_gato, echo=FALSE, results="hide"}
@@ -629,7 +628,9 @@ survdiff(
 )
 ```
 
-El test de Log-Rank arroja un estadístico $\chi^{2} = 915$  con un $p \leq  2 \times 10^{-16}$, por lo que se rechaza la hipótesis de igualdad entre ambas curvas. En consecuencia, existe evidencia estadísticamente significativa de que el tipo de animal está asociado con el tiempo hasta la adopción.
+El test de Log-Rank arroja un estadístico $\chi^{2} = 915$  con un $p \leq  2 \times 10^{-16}$, por lo que se rechaza la hipótesis nula de igualdad entre ambas curvas de supervivencia. En consecuencia, existe evidencia estadísticamente significativa de que el tipo de animal se encuentra asociado con el tiempo hasta la adopción.
+
+Si bien las diferencias observadas entre las curvas no son muy pronunciadas a simple vista, el gran tamaño de la muestra hace que resulten estadísticamente significativas.
 
 #### Comparar machos vs hembras
 
@@ -658,7 +659,7 @@ legend(
 
 ```
 
-Las curvas correspondientes a machos y hembras prácticamente se superponen durante todo el período de seguimiento, lo que sugiere que el sexo tiene un efecto muy pequeño sobre el tiempo de adopción.
+Las curvas correspondientes a machos y hembras prácticamente se superponen durante todo el período de seguimiento, lo que sugiere que el sexo tiene un efecto muy reducido sobre el tiempo hasta la adopción.
 
 ```{r comparacion_sexo, echo=FALSE, results="hide"}
 survdiff(
@@ -667,7 +668,7 @@ survdiff(
 )
 ```
 
-No obstante, el test de Log-Rank resulta significativo $(\ \chi^{2} = 22.3, \; p = 2 \times 10^{-6} )$. Esta significancia probablemente se explica por el gran tamaño de la muestra, que permite detectar diferencias muy pequeñas. ~~Desde un punto de vista práctico, el efecto del sexo sobre el tiempo de adopción parece poco relevante.~~ Aunque el p-valor es chico, comparativamente la variable tiene poco peso en el resultado.
+No obstante, el test de Log-Rank resulta significativo $(\ \chi^{2} = 22.3, \; p = 2 \times 10^{-6} )$, por lo que se rechaza la hipótesis de igualdad entre ambas curvas. Esta significancia probablemente se explica por el gran tamaño de la muestra, que permite detectar diferencias muy pequeñas. En consecuencia, aunque la diferencia es estadísticamente significativa, su magnitud parece ser reducida desde un punto de vista práctico.
 
 #### Esterilizados
 
@@ -696,7 +697,7 @@ legend(
 
 ```
 
-Las curvas de Kaplan-Meier muestran que los animales que ingresan sin esterilizar presentan tiempos de adopción menores que aquellos que ya se encontraban esterilizados al ingresar al refugio.
+Las curvas de Kaplan-Meier muestran que los animales que ingresan sin esterilizar presentan tiempos hasta la adopción menores que aquellos que ya se encontraban esterilizados al ingresar al refugio. Esta diferencia se mantiene durante gran parte del período de seguimiento, lo que sugiere una asociación consistente entre el estado de esterilización y el tiempo de adopción.
 
 ```{r comparacion_esterilizados, echo=FALSE, results="hide"}
 survdiff(
@@ -705,7 +706,7 @@ survdiff(
 )
 ```
 
-Estas diferencias son confirmadas por el test de Log-Rank $(\ \chi^{2} = 351, \; p \leq 2 \times 10^{-16} )$, por lo que existe evidencia estadísticamente significativa de una asociación entre el estado de esterilización y el tiempo de adopción.
+El test de Log-Rank confirma esta diferencia $(\ \chi^{2} = 351, \; p \leq 2 \times 10^{-16} )$, por lo que se rechaza la hipótesis nula de igualdad entre ambas curvas. En consecuencia, existe evidencia estadísticamente significativa de que el estado de esterilización se encuentra asociado con el tiempo hasta la adopción.
 
 #### Edad
 
@@ -747,7 +748,7 @@ legend(
 
 ```
 
-Las curvas muestran un patrón muy marcado. Los animales de entre uno y cinco años presentan la caída más rápida de la curva de supervivencia, lo que indica que son adoptados en menor tiempo. Los menores de un año muestran una velocidad de adopción intermedia, mientras que los animales mayores de cinco años presentan la curva más alta durante casi todo el seguimiento, siendo el grupo que permanece más tiempo en el refugio antes de ser adoptado.
+Las curvas de Kaplan-Meier muestran un patrón claramente diferenciado entre los tres grupos. Los animales menores de un año presentan el descenso más pronunciado de la curva de supervivencia, lo que indica que, en promedio, son adoptados en menor tiempo. Los que tienen entre uno y cinco años muestran un comportamiento intermedio, mientras que los animales mayores de cinco años mantienen la curva de supervivencia más elevada durante gran parte del período de seguimiento, siendo el grupo que permanece más tiempo en el refugio antes de ser adoptado.
 
 ```{r comparacion_edad, echo=FALSE, results="hide"}
 survdiff(
@@ -756,10 +757,10 @@ survdiff(
 )
 ```
 
-El test de Log-Rank confirma estas diferencias $(\ \chi^{2} = 2468, \; p \leq 2 \times 10^{-16} )$, constituyendo la asociación más fuerte observada entre todas las variables analizadas.
+El test de Log-Rank confirma que las diferencias entre las curvas son estadísticamente significativas $(\ \chi^{2} = 2468, \; p \leq 2 \times 10^{-16} )$, por lo que existe evidencia de una asociación entre la edad y el tiempo hasta la adopción.
 
 
 #### Conclusión
 
-En conjunto, los resultados muestran que el tiempo hasta la adopción depende de varias características del animal. La edad resulta ser la variable con mayor asociación con el tiempo de adopción, seguida por el tipo de animal y el estado de esterilización. Por el contrario, aunque el sexo presenta diferencias estadísticamente significativas debido al gran tamaño de la muestra, las curvas prácticamente se superponen, por lo que su efecto práctico parece ser reducido.
+En conjunto, los resultados muestran que el tiempo hasta la adopción se encuentra asociado con varias características del animal. En particular, la edad, el tipo de animal y el estado de esterilización presentan diferencias claras entre sus curvas de supervivencia, mientras que las curvas correspondientes a machos y hembras prácticamente se superponen. Si bien el test de Log-Rank detecta diferencias estadísticamente significativas para el sexo, estas parecen ser de escasa relevancia práctica debido al gran tamaño de la muestra.
 
