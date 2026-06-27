@@ -21,7 +21,7 @@ library(knitr)
 
 ## Ejercicio 1
 
-Empezamos cargando los datos y observando algunas métricas básicas, y la distribución de sus distintos atributos:
+Empezamos cargando los datos y observando algunas sus métricas básicas y la distribución de sus atributos:
 
 
 ```{r summary_data, echo=FALSE}
@@ -37,22 +37,13 @@ data_refugio$sterilized = as.factor(data_refugio$sterilized)
 summary(data_refugio)
 ```
 
-
-```{r glimpse, echo=FALSE}
-glimpse(data_refugio)
-```
 Observando estos resultados, vemos que tenemos una gran cantidad de muestras (137,806). Tenemos más muestras de perros que de gatos (56,33% son perros), pero no es una diferencia significativa. La distribución de sexos es más equitativa aún (51,24%). Por otro lado, la mayoría de los animales no estaban esterilizados al llegar al refugio (79,40%). 
 
 La edad de los animales cuando llegaron al refugio es por lo general pequeña, con mediana de 1 año, y un promedio ligeramente mayor. Aún así, tenemos unos pocos casos más extremos, como el animal que entró con 24 años. Las edades se registran con números enteros, pero el tiempo de estadía está registrado con coma. La mayoría de los animales se quedaron menos de 24 días en el refugio, y el animal que se quedó más tiempo estuvo un año.
 
-
-Observando estos resultados, vemos que tenemos una gran cantidad de muestras. La distribución entre perros y gatos es bastante pareja, aunque hay un poco más de perros. La distribución de sexos es más equitativa aún. Por otro lado, la mayoría de los animales no estaban esterilizados al llegar al refugio. La edad de los animales cuando llegaron al refugio es por lo general pequeña, pero tenemos algunos casos más extremos, como el animal que entró con 24 años. Las edades se registran con números enteros, pero el tiempo de estadía está registrado con coma.
-
 Respecto al desenlace, la mayoría de los animales del refugio fueron adoptados (52.9%), el resto siendo transferido (28.5%), devuelto (14.7%), o liquidado (3.7%).
 
-Otras métricas interesantes:
-
-```{r razas, echo=FALSE}
+```{r razas, echo=FALSE, results='hide'}
 cantidad_de_razas <- data_refugio %>%
   summarise(cantidad = n_distinct(breed_main))
 
@@ -73,48 +64,43 @@ razas_gato_perro <- data_refugio %>%
 cat("Hay", razas_gato_perro$cantidad[1], 'razas de gato y', razas_gato_perro$cantidad[2], 'razas de perro en el dataset')
 ```
 
-Podemos ver que hay una gran diferencia entre la media y la mediana, lo que nos da la indicación de que hay pocas razas muy representadas. Vemos la cantidad de animales por raza, contando solo razas con más de 100 animales.
+Estudiando los datos, vemos que tenemos 473 razas distitnas, 73 de gato y 400 de perro. En promedio tenemos 291.34 muestras por raza, pero la mediana es 22. La gran diferencia entre la media y la mediana nos da la indicación de que hay pocas razas muy representadas. Vemos la cantidad de animales por raza, contando solo razas con más de 100 animales.
 
 ```{r razas_100, echo=FALSE}
 total = nrow(data_refugio)
 
 total_cortado = data_refugio %>%
   group_by(breed_main) %>%
-  summarise(Cantidad = n(), .groups = "drop") %>%
-  filter(Cantidad >= 100) %>%
-  pull(Cantidad) %>%  # Extrae la columna como un vector
+  summarise(cantidad = n(), .groups = "drop") %>%
+  filter(cantidad >= 100) %>%
+  pull(cantidad) %>%  # Extrae la columna como un vector
   sum()
 
 
-data_refugio %>%
-  group_by(breed_main) %>%
-  summarise(Cantidad = n(), 
-            'Porcentaje del total' = paste0(round(n()/total*100, 2),'%'), 
-            'Porcentaje del corte' = paste0(round(n()/total_cortado*100, 2),'%'),
-            .groups = "drop") %>%
-  filter(Cantidad >= 100) %>%
-  arrange(-Cantidad)
-
-```
-
-```{r tabla_raza_100, echo=FALSE}
 tabla_razas <- data_refugio %>%
   group_by(breed_main) %>%
-  summarise(cantidad = n(), .groups = "drop") %>%
+  summarise(cantidad = n(), 
+            porcentaje_total = paste0(round(n()/total*100, 2),'%'), 
+            porcentaje_corte = paste0(round(n()/total_cortado*100, 2),'%'),
+            .groups = "drop") %>%
   filter(cantidad >= 100) %>%
-  arrange(desc(cantidad))
+  arrange(-cantidad)
 
 knitr::kable(
   head(tabla_razas, 10),
-  caption = "Las 10 razas con mayor cantidad de animales (considerando solo razas con al menos 100 animales)"
+  caption = "Las 10 razas con mayor cantidad de animales (considerando solo razas con al menos 100 animales)",
+  align = c("l", "r", "r", "r"),
+  col.names = c("Raza Principal", "Cantidad", "Porcentaje del Total", "Porcentaje del Corte")
 )
 
-cat("En total,", nrow(tabla_razas),
-    "razas poseen al menos 100 animales registrados.")
 ```
 
 
+
 ```{r cant_por_tipo, echo=FALSE, results="hide"}
+
+cat("En total,", nrow(tabla_razas),
+    "razas poseen al menos 100 animales registrados.")
 
 razas_representadas = data_refugio %>%
   group_by(breed_main, animal_type) %>%
@@ -129,30 +115,10 @@ cat('Tipos de razas de perros con más de 100 muestras:', razas_representadas$ca
 cat('Total de muestras en el dataset cortado:', total_cortado)
 ```
 
-Podemos ver que solo 120 de 473 razas tienen más de 100 muestras, y que solo 12 de ellas son gatos. Además, de esas razas, El Domestic Shorthair Mix es el 20,78% de las muestras totales del dataset.
+Explorando los datos, observamos que solo 120 de 473 razas tienen más de 100 muestras, y que solo 12 de ellas son gatos. Además, de esas razas, El Domestic Shorthair Mix es la más numerosa, representando el 20,78% de las muestras totales del dataset, y el 21,96% de las muestras del dataset filtrado.
 
-También se puede ver que, aunque sacamos más de la mitad de las razas, el dataset que nos queda sigue teniendo más de 130 mil muestras.
+También notamos que, aunque sacamos más de la mitad de las razas, el dataset que nos queda sigue teniendo una gran cantidad de muestras (130,423).
 
-
-```{r prueba, echo=FALSE}
-knitr::kable(
-  data_refugio %>%
-  group_by(breed_main, animal_type) %>%
-  summarise(cantidad = n(), .groups = "drop") %>%
-  filter(cantidad >= 100) %>%
-  group_by(animal_type) %>%
-  summarise(cantidad_por_tipo = n(), .groups = "drop"),
-  caption = "Cantidad de Animales x Tipo"
-)
-```
-
-
-Podemos ver que solo 120 de 473 razas tienen más de 100 muestras, y que solo 12 de ellas son gatos.
-
-
-```{r, echo=FALSE}
-refugio <- read.csv("refugio.csv")
-```
 
 ## Ejercicio 2
 
@@ -163,6 +129,8 @@ Ahora vamos a estimar la tasa de adopción de cada raza, y vamos a medir si el e
 
 
 ```{r verdad, echo=FALSE, results="hide"}
+refugio <- read.csv("refugio.csv")
+
 verdad <- refugio %>%
   group_by(breed_main) %>%
   summarise(
@@ -178,9 +146,7 @@ head(verdad)
 ```
 
 
-
 Luego de aplicar el filtro de al menos 100 animales por raza, se obtuvo un conjunto de razas para las cuales la tasa de adopción puede considerarse una aproximación confiable de la probabilidad real de adopción. Estas tasas se utilizarán posteriormente como referencia ("verdad") para evaluar el desempeño de los distintos estimadores.
-
 
 ```{r grafico_verdad, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
 verdad %>%
@@ -203,9 +169,6 @@ La Figura 1 presenta las diez razas con mayor tasa de adopción calculada sobre 
 ### Inciso (b): 
 Con el objetivo de simular un escenario con información limitada, se tomó una muestra aleatoria de m=15 animales para cada una de las razas consideradas en el inciso anterior. A partir de estas muestras se calculó la tasa cruda de adopción, definida como la proporción de animales adoptados dentro de cada muestra. Esta estimación representa la aproximación que se obtendría si solo se dispusiera de una cantidad reducida de observaciones por raza.
 
-**yo esta explicación la sacaría**
-
-Fijar una semilla
 
 ```{r semilla, echo=FALSE, results="hide"}
 
@@ -264,8 +227,11 @@ head(tasa_cruda)
 
 ```{r tasa_cruda_pdf, echo=FALSE}
 knitr::kable(
-  head(tasa_cruda,5),
-  caption = "Primeras seis razas de la muestra"
+  head(tasa_cruda,5) %>% 
+    mutate(tasa_cruda = paste0(round(tasa_cruda*100, 2), '%')),
+  caption = "Primeras cinco razas de la muestra",
+  align = c('l', 'r', 'r'),
+  col.names = c("Raza Principal", "Adoptados en la muestra", "Tasa cruda")
 )
 ```
 
@@ -334,10 +300,11 @@ comparacion <- comparacion %>%
 ```
 
 ```{r grafico_comparacion_EB_verdadera, echo=FALSE, fig.align='center', fig.width=4, fig.height=2}
-ggplot(comparacion,
-       aes(x = tasa_real,
+ggplot(comparacion) +
+  geom_point(aes(x = tasa_real,
+           y = tasa_cruda), alpha = 0.4, size = 1, color='blue') +
+  geom_point(aes(x = tasa_real,
            y = tasa_EB)) +
-  geom_point(alpha = 0.6, size = 2) +
   geom_abline(
     slope = 1,
     intercept = 0,
@@ -355,7 +322,7 @@ ggplot(comparacion,
     axis.text = element_text(size = 7)
   )
 ```
-La Figura 3 compara las estimaciones obtenidas mediante el método Empirical Bayes con la tasa verdadera de adopción calculada utilizando el conjunto completo de datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que la estimación coincide exactamente con la tasa verdadera.
+La Figura 3 compara las estimaciones obtenidas mediante el método Empirical Bayes con la tasa verdadera de adopción calculada utilizando el conjunto completo de datos. La línea roja representa la recta identidad (y=x), correspondiente al caso ideal en el que la estimación coincide exactamente con la tasa verdadera. Los estimadores bayesianos son los puntos negros, y para comparar con el gráfico anterios, se mantuvieron los estimadores crudos en azul.
 
 Se observa una relación positiva entre ambas variables, ya que las estimaciones Empirical Bayes tienden a seguir la tendencia de las tasas verdaderas. La mayoría de las observaciones se concentra alrededor de la recta identidad, lo que indica que el estimador logra aproximar adecuadamente la tasa de adopción de cada raza aun cuando se dispone únicamente de una muestra reducida de animales.
 
