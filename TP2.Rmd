@@ -1,0 +1,277 @@
+---
+title: "TP 2 - Modelado Estadístico"
+author: |
+  Allami Florencia - Vanotti Franco
+
+output: 
+  pdf_document:
+    latex_engine: xelatex
+
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(stringr)
+library(tidytext)
+library(forcats)
+library(patchwork)
+library(tidytext)
+
+# result='hide' oculta tmb el resultado del chunk
+```
+
+
+
+```{r summary_data, echo=FALSE}
+
+# Cargar datos
+
+titles <- read.csv("titles_train.csv",
+                   stringsAsFactors = FALSE)
+
+credits <- read.csv("credits_train.csv",
+                    stringsAsFactors = FALSE)
+```
+
+
+
+```{r razas, echo=FALSE, results='hide'}
+
+# Vista general
+
+glimpse(titles)
+
+summary(titles)
+
+colSums(is.na(titles))
+
+```
+
+
+```{r razas_100, echo=FALSE}
+
+ggplot(titles, aes(imdb_score)) +
+    geom_histogram(bins = 30,
+                   fill = "steelblue",
+                   color = "white") +
+    labs(title="Distribución de IMDb Score")
+
+```
+
+
+
+```{r cant_por_tipo, echo=FALSE, results="hide"}
+
+# (a) ¿Qué géneros parecen asociados al puntaje?
+
+# La columna genres es una lista almacenada como texto. Hay que separarla.
+
+genres_long <-
+    titles %>%
+    select(id, imdb_score, genres) %>%
+    mutate(genres =
+               genres %>%
+               str_remove_all("\\[|\\]|'")) %>%
+    separate_rows(genres, sep=",") %>%
+    mutate(genres = str_trim(genres))
+
+```
+
+
+```{r verdad, echo=FALSE, results="hide"}
+
+# Ahora podemos calcular el promedio por género.
+
+genre_summary <-
+    genres_long %>%
+    group_by(genres) %>%
+    summarise(
+        n = n(),
+        promedio = mean(imdb_score, na.rm = TRUE)
+    ) %>%
+    arrange(desc(promedio))
+
+# Mostrar sólo géneros frecuentes.
+
+genre_summary %>%
+    filter(n >= 50) %>%
+    ggplot(aes(fct_reorder(genres, promedio), promedio)) +
+    geom_col(fill="darkorange") +
+    coord_flip() +
+    labs(
+        x="Género",
+        y="IMDb promedio"
+    )
+
+genres_long %>%
+    group_by(genres) %>%
+    filter(n() >= 50) %>%
+    ggplot(aes(fct_reorder(genres, imdb_score, median),
+               imdb_score)) +
+    geom_boxplot() +
+    coord_flip()
+```
+
+
+```{r grafico_verdad, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
+
+#(b) ¿Qué actores están asociados con mejores puntajes?
+
+actors <-
+    credits %>%
+    filter(role == "ACTOR")
+
+# Hacemos el merge.
+
+actor_scores <-
+    actors %>%
+    inner_join(
+        titles %>% select(id, imdb_score),
+        by="id"
+    )
+
+# Calculamos promedio.
+
+actor_summary <-
+    actor_scores %>%
+    group_by(name) %>%
+    summarise(
+        peliculas = n(),
+        promedio = mean(imdb_score)
+    ) %>%
+    filter(peliculas >= 5) %>%
+    arrange(desc(promedio))
+
+
+# Top mejores actores.
+
+actor_summary %>%
+    slice_max(promedio, n=15) %>%
+    ggplot(aes(fct_reorder(name, promedio),
+               promedio)) +
+    geom_col(fill="forestgreen") +
+    coord_flip()
+
+# Top peores actores
+
+actor_summary %>%
+    slice_min(promedio, n=15) %>%
+    ggplot(aes(fct_reorder(name, promedio),
+               promedio)) +
+    geom_col(fill="firebrick") +
+    coord_flip()
+
+```
+
+
+
+
+```{r semilla, echo=FALSE, results="hide"}
+
+# Directores
+
+directors <-
+    credits %>%
+    filter(role == "DIRECTOR")
+
+director_scores <-
+    directors %>%
+    inner_join(
+        titles %>%
+        select(id, imdb_score),
+        by="id"
+    )
+
+director_summary <-
+    director_scores %>%
+    group_by(name) %>%
+    summarise(
+        peliculas=n(),
+        promedio=mean(imdb_score)
+    ) %>%
+    filter(peliculas>=3)
+
+director_summary %>%
+    slice_max(promedio,n=15) %>%
+    ggplot(aes(fct_reorder(name,promedio),
+               promedio))+
+    geom_col(fill="steelblue")+
+    coord_flip()
+
+# Top peores actores
+
+director_summary %>%
+    slice_min(promedio,n=15) %>%
+    ggplot(aes(fct_reorder(name,promedio),
+               promedio))+
+    geom_col(fill="lightgreen")+
+    coord_flip()
+
+```
+
+
+```{r tamaño_muestra, echo=FALSE, results="hide"}
+
+# (c) Palabras asociadas con el puntaje
+
+words <-
+    titles %>%
+    select(id, imdb_score, description) %>%
+    unnest_tokens(word, description)
+
+data(stop_words)
+
+words <-
+    words %>%
+    anti_join(stop_words, by="word")
+
+word_summary <-
+    words %>%
+    group_by(word) %>%
+    summarise(
+        frecuencia = n(),
+        promedio = mean(imdb_score)
+    ) %>%
+    filter(frecuencia >= 20)
+
+word_summary %>%
+    slice_max(promedio, n=20) %>%
+    ggplot(aes(fct_reorder(word,promedio),
+               promedio))+
+    geom_col(fill="darkgreen")+
+    coord_flip()
+
+word_summary %>%
+    slice_min(promedio, n=20) %>%
+    ggplot(aes(fct_reorder(word,promedio),
+               promedio))+
+    geom_col(fill="red")+
+    coord_flip()
+```
+
+
+
+```{r seleccion_razas, echo=FALSE, results="hide"}
+
+# Palabras del título
+
+title_words <-
+    titles %>%
+    select(imdb_score, title) %>%
+    unnest_tokens(word, title) %>%
+    anti_join(stop_words)
+
+title_summary <-
+    title_words %>%
+    group_by(word) %>%
+    summarise(
+        frecuencia=n(),
+        promedio=mean(imdb_score)
+    ) %>%
+    filter(frecuencia>=10)
+
+
+```
+
