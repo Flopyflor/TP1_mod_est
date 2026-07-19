@@ -24,7 +24,7 @@ library(tidytext)
 
 
 
-```{r summary_data, echo=FALSE}
+```{r load_data, echo=FALSE}
 
 # Cargar datos
 
@@ -37,7 +37,7 @@ credits <- read.csv("credits_train.csv",
 
 
 
-```{r razas, echo=FALSE, results='hide'}
+```{r summary_data, echo=FALSE, results='hide'}
 
 # Vista general
 
@@ -50,7 +50,7 @@ colSums(is.na(titles))
 ```
 
 
-```{r razas_100, echo=FALSE}
+```{r plot_data, echo=FALSE}
 
 ggplot(titles, aes(imdb_score)) +
     geom_histogram(bins = 30,
@@ -62,7 +62,7 @@ ggplot(titles, aes(imdb_score)) +
 
 
 
-```{r cant_por_tipo, echo=FALSE, results="hide"}
+```{r generos_puntaje, echo=FALSE, results="hide"}
 
 # (a) ¿Qué géneros parecen asociados al puntaje?
 
@@ -80,7 +80,7 @@ genres_long <-
 ```
 
 
-```{r verdad, echo=FALSE, results="hide"}
+```{r promedio_por_genero, echo=FALSE, results="hide"}
 
 # Ahora podemos calcular el promedio por género.
 
@@ -115,7 +115,7 @@ genres_long %>%
 ```
 
 
-```{r grafico_verdad, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
+```{r actores_puntaje, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
 
 #(b) ¿Qué actores están asociados con mejores puntajes?
 
@@ -168,7 +168,7 @@ actor_summary %>%
 
 
 
-```{r semilla, echo=FALSE, results="hide"}
+```{r directores_puntaje, echo=FALSE, results="hide"}
 
 # Directores
 
@@ -212,7 +212,7 @@ director_summary %>%
 ```
 
 
-```{r tamaño_muestra, echo=FALSE, results="hide"}
+```{r palabras_puntaje, echo=FALSE, results="hide"}
 
 # (c) Palabras asociadas con el puntaje
 
@@ -253,7 +253,7 @@ word_summary %>%
 
 
 
-```{r seleccion_razas, echo=FALSE, results="hide"}
+```{r palabras_titulo_puntaje, echo=FALSE, results="hide"}
 
 # Palabras del título
 
@@ -272,6 +272,61 @@ title_summary <-
     ) %>%
     filter(frecuencia>=10)
 
+
+```
+
+2. Causalidad. Se tiene el siguiente DAG: 
+
+[img]
+
+donde Comedia es una variable binaria que indica si el género del título incluye comedia. ¿A
+qué subconjunto de las variables Año, Duración y País se debe condicionar para estimar
+el efecto causal directo de Comedia sobre el Score —es decir, el efecto que no está
+mediado por la Duración—? Dar todas las posibilidades y justificar. Luego estimar ese
+efecto con una regresión sobre los datos (Comedia sale de genres, Duración de runtime,
+Año de release_year y País de production_countries) y compararlo con la asociación
+cruda de Comedia sobre Score (sin ajustar por nada).
+
+El efecto de Comedia sobre Score está mediado por Duración, que crea un camino siendo cadena. Además, está afectado por País, que crea un camino como cofounder. Al condicionar por Duración, que es collider entre Año y Comedia, se abre el camino Comedia - Duración - Año - Score, por lo que hay que también condicionar por Año. Luego, la forma más clara de medir el efecto causal directo de Comedia sobre Score es condicionando por Duración, País y Año.
+
+Para medir el efecto causal promedio, basta medir la asociación, gracias al criterio de la puerta trasera. Bloquear los caminos de acción indirecta permite que el valor real de Comedia y el Score que obtendría dado un valor de Comedia sean independientes, y por lo tanto, la asociación y el efecto causal son iguales. 
+
+
+```{r efecto_causal_directo, echo=FALSE, results="hide"}
+
+# acá entiendo que hay que hacer la esperanza sobre nuestras condicionales, de la esperanza de Score dado comedia = 1 y condicionales = z menos la esperanza de Score dado comedia = 0 y condicionales = z.
+
+
+
+```
+
+
+3. Selección de modelos. Dividir el conjunto de datos en entrenamiento y testeo (tam
+bién pueden usar otra técnica, como validación cruzada). Con todas las variables dispo
+nibles, probar al menos 5 modelos diferentes y mostrar la estimación del error
+cuadrático medio (MSE) de cada uno. Entre los modelos candidatos deben incluir sí o
+sí al menos un modelo de efectos mixtos y una regresión con splines. Elegir el modelo
+que minimice el MSE de predicción para el rating de IMDB.
+
+Cinco modelos: efectos mixtos, regresión con splines, lineal?, uhh bayes (previa semi normal)?, idk??
+
+```{r modelos, echo=FALSE, results="hide"}
+
+# implementar modelo (?) por ahí toca definir cosas con STAN.
+
+```
+
+4. Competencia. En los archivos titles_test.csv y credits_test.csv aparecen
+1652 nuevos títulos, para los cuales no se incluye el rating de IMDB (pero yo sí
+lo tengo). A partir del modelo elegido en el ítem anterior, producir un archivo
+predicciones_<apellido1>_<apellido2>_<apellido3>.csv con una sola columna
+y sin encabezado, donde la fila i contenga la predicción del rating de IMDB para el
+título de la fila i (debe tener tantas filas como el test). A partir de esas predicciones, yo
+voy a computar el error cuadrático medio de cada equipo, y gana el que tenga el menor.
+
+```{r nuestras_predicciones, echo=FALSE, results="hide"}
+
+# hacer las predicciones
 
 ```
 
