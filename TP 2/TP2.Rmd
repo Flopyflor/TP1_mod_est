@@ -17,7 +17,6 @@ library(stringr)
 library(tidytext)
 library(forcats)
 library(patchwork)
-library(tidytext)
 
 # result='hide' oculta tmb el resultado del chunk
 ```
@@ -36,6 +35,10 @@ credits <- read.csv("credits_train.csv",
 ```
 
 
+## Exploración inicial
+
+Como primer paso se realiza una inspección general del conjunto de datos para conocer su estructura, el tipo de las variables disponibles y la presencia de valores faltantes. Esta información resulta útil para decidir qué variables pueden utilizarse posteriormente en el análisis y qué preprocesamiento será necesario realizar.
+
 
 ```{r summary_data, echo=FALSE, results='hide'}
 
@@ -48,7 +51,13 @@ summary(titles)
 colSums(is.na(titles))
 
 ```
+El conjunto de datos contiene **3631 títulos** y **12 variables**, entre las que se incluyen información descriptiva (título, descripción, géneros y país de producción), características del contenido (duración, año de lanzamiento y clasificación por edad) y la variable objetivo **IMDb Score**.
 
+No se observan valores faltantes en la mayoría de las variables. Sin embargo, la variable **seasons** presenta una gran cantidad de valores ausentes, lo cual es esperable ya que únicamente aplica a series y no a películas. La variable **imdb_votes** posee únicamente 13 valores faltantes.
+
+## Distribución del puntaje de IMDb
+
+Antes de estudiar la relación entre las covariables y el puntaje de IMDb, resulta útil analizar la distribución de la variable respuesta. Para ello se construye un histograma del puntaje de IMDb.
 
 ```{r plot_data, echo=FALSE}
 
@@ -60,7 +69,13 @@ ggplot(titles, aes(imdb_score)) +
 
 ```
 
+La distribución presenta una forma aproximadamente unimodal, concentrándose la mayor parte de los títulos entre puntajes **6 y 7.5**. Existen pocos títulos con puntajes extremadamente bajos o muy cercanos al máximo, por lo que la distribución presenta una ligera asimetría hacia la izquierda.
 
+Esto indica que la mayoría de los contenidos poseen una valoración intermedia-alta, mientras que los títulos muy malos o excelentes representan una proporción reducida del conjunto de datos.
+
+## Relación entre el género y el puntaje de IMDb
+
+La variable **genres** se encuentra almacenada como una lista codificada en formato texto, por lo que primero es necesario transformarla para obtener un registro por cada género asociado a un título. De esta forma será posible calcular estadísticas descriptivas para cada género individualmente.
 
 ```{r generos_puntaje, echo=FALSE, results="hide"}
 
@@ -79,6 +94,9 @@ genres_long <-
 
 ```
 
+Una vez separado cada género en una observación independiente, los datos quedan preparados para calcular el puntaje promedio y estudiar la distribución del puntaje dentro de cada categoría.
+
+Para responder el inciso (a), se calcula el puntaje promedio de IMDb para cada género y posteriormente se analizan las distribuciones mediante boxplots. Con el objetivo de evitar conclusiones basadas en muy pocas observaciones, únicamente se consideran géneros presentes en al menos 50 títulos.
 
 ```{r promedio_por_genero, echo=FALSE, results="hide"}
 
@@ -114,6 +132,15 @@ genres_long %>%
     coord_flip()
 ```
 
+Se observa que los géneros **War**, **History** y **Documentation** presentan, en promedio, los puntajes más elevados, mientras que **Horror** y **Family** aparecen entre los de menor promedio.
+
+Sin embargo, los diagramas de caja muestran un importante solapamiento entre las distribuciones de los distintos géneros, lo que indica que el género por sí solo no determina completamente la calificación de un título. Aun así, existen diferencias sistemáticas que sugieren que esta variable podría aportar información útil para la predicción del puntaje.
+
+## Actores asociados con mejores y peores puntajes
+
+Para estudiar la influencia del elenco, se unen los datos de actores con los puntajes de IMDb mediante el identificador del título. Luego se calcula el puntaje promedio obtenido por cada actor.
+
+Con el fin de reducir el efecto del azar, solamente se consideran actores que hayan participado en al menos cinco títulos del conjunto de entrenamiento.
 
 ```{r actores_puntaje, fig.align='center', echo=FALSE, fig.width=5, fig.height=3}
 
@@ -165,8 +192,14 @@ actor_summary %>%
 
 ```
 
+Los gráficos muestran los actores con mayor y menor puntaje promedio. Debe destacarse que estos resultados representan una asociación y no una relación causal. Un actor puede aparecer con un promedio elevado simplemente porque ha participado en un conjunto reducido de producciones muy bien valoradas.
+
+No obstante, este análisis permite identificar que la participación de determinados actores podría aportar información relevante para estimar el puntaje de IMDb.
 
 
+## Directores asociados con mejores y peores puntajes
+
+Se realiza un procedimiento análogo para los directores, calculando el puntaje promedio de las producciones dirigidas por cada uno de ellos. En este caso se consideran únicamente aquellos directores con al menos tres títulos en el conjunto de datos.
 
 ```{r directores_puntaje, echo=FALSE, results="hide"}
 
@@ -210,7 +243,16 @@ director_summary %>%
     coord_flip()
 
 ```
+Se observan diferencias importantes entre los promedios de los distintos directores. Algunos presentan promedios superiores a 8 puntos, mientras que otros se encuentran por debajo de 5.
 
+Al igual que en el caso de los actores, estos resultados deben interpretarse con cautela, ya que el promedio depende tanto de la calidad de las producciones como de la cantidad de títulos considerados. Sin embargo, la identidad del director parece contener información útil para explicar el puntaje obtenido por una producción.
+
+
+## Palabras de la descripción asociadas al puntaje
+
+Para responder el inciso (c), se analiza el texto de la descripción de cada título utilizando técnicas básicas de procesamiento de lenguaje natural. En primer lugar, las descripciones se dividen en palabras individuales (*tokenización*) y posteriormente se eliminan las palabras vacías (*stop words*), ya que suelen aportar poca información semántica.
+
+Finalmente, se calcula el puntaje promedio asociado a cada palabra, considerando únicamente aquellas que aparecen al menos 20 veces en el conjunto de datos.
 
 ```{r palabras_puntaje, echo=FALSE, results="hide"}
 
@@ -250,7 +292,14 @@ word_summary %>%
     geom_col(fill="red")+
     coord_flip()
 ```
+Se identifican palabras cuya presencia se asocia con puntajes promedio más altos y otras con puntajes inferiores. Sin embargo, estas asociaciones no deben interpretarse como relaciones causales, sino como indicadores de tendencias presentes en el conjunto de datos.
 
+Este análisis sugiere que el contenido textual de las descripciones contiene información predictiva que podría ser aprovechada posteriormente mediante técnicas de representación de texto.
+
+
+## Palabras del título asociadas al puntaje
+
+De manera similar al análisis anterior, se estudian las palabras presentes en el nombre de cada título. Luego de tokenizar los títulos y eliminar las palabras vacías, se calcula el puntaje promedio asociado a cada palabra, considerando únicamente aquellas que aparecen al menos diez veces.
 
 
 ```{r palabras_titulo_puntaje, echo=FALSE, results="hide"}
@@ -273,7 +322,23 @@ title_summary <-
     filter(frecuencia>=10)
 
 
+title_summary %>%
+  slice_max(promedio, n = 20) %>%
+  ggplot(aes(fct_reorder(word, promedio), promedio)) +
+  geom_col(fill = "darkgreen") +
+  coord_flip()
+
+title_summary %>%
+  slice_min(promedio, n = 20) %>%
+  ggplot(aes(fct_reorder(word, promedio), promedio)) +
+  geom_col(fill = "red") +
+  coord_flip()
+
 ```
+
+El análisis muestra que ciertas palabras aparecen con mayor frecuencia en títulos con puntajes elevados, mientras que otras se asocian con producciones de menor valoración promedio.
+
+Si bien estas diferencias pueden deberse parcialmente al tipo de contenido o al género de las producciones, los resultados indican que el título también contiene información potencialmente útil para construir modelos predictivos.
 
 2. Causalidad. Se tiene el siguiente DAG: 
 
@@ -290,6 +355,8 @@ cruda de Comedia sobre Score (sin ajustar por nada).
 El efecto de Comedia sobre Score está mediado por Duración, que crea un camino siendo cadena. Además, está afectado por País, que crea un camino como cofounder. Al condicionar por Duración, que es collider entre Año y Comedia, se abre el camino Comedia - Duración - Año - Score, por lo que hay que también condicionar por Año. Luego, la forma más clara de medir el efecto causal directo de Comedia sobre Score es condicionando por Duración, País y Año.
 
 Para medir el efecto causal promedio, basta medir la asociación, gracias al criterio de la puerta trasera. Bloquear los caminos de acción indirecta permite que el valor real de Comedia y el Score que obtendría dado un valor de Comedia sean independientes, y por lo tanto, la asociación y el efecto causal son iguales. 
+
+
 
 
 ```{r efecto_causal_directo, echo=FALSE, results="hide"}
@@ -309,6 +376,19 @@ sí al menos un modelo de efectos mixtos y una regresión con splines. Elegir el
 que minimice el MSE de predicción para el rating de IMDB.
 
 Cinco modelos: efectos mixtos, regresión con splines, lineal?, uhh bayes (previa semi normal)?, idk??
+
+Ideas de modelos (en teoria todos se pueden hacer en R)
+
+- Regresión lineal
+- GAM (es una extensión de la regresión con splines y suele funcionar mejor.)
+- Efectos mixtos
+- Elastic Net (regresión lineal que usa Ridge y Lasso,)
+- Random Forest (arma muchos árboles de decisión sobre distintas muestras aleatorias de los datos y combina sus predicciones)
+- XGBoost (gradient boosting - construye árboles de decisión de manera secuencial, donde cada árbol intenta corregir los errores del anterior)
+- BART (modelo bayesiano que representa la respuesta como la suma de muchos árboles de decisión pequeños, permitiendo modelar relaciones complejas mientras cuantifica la incertidumbre de las predicciones)
+- AutoML (técnica que automatiza el proceso de selección del mejor modelo y de sus hiperparámetros, probando distintos algoritmos y configuraciones)
+
+
 
 ```{r modelos, echo=FALSE, results="hide"}
 
