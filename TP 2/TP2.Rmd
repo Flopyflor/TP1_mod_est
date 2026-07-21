@@ -415,7 +415,8 @@ ate_simple <- mean(resultado_estratos$efecto_z)
 
 ```{r efecto_causal_directo_bayes, echo=FALSE, results="hide"}
 
-library(fitdistrplus)
+library(fitdistrplus) # lo puse acá porque sino los selects tienen que ser dpryl::select
+# esto instala MASS, que tiene otra función select entonces se pisa con dpryl
 
 
 ### tomando las duraciones de a grupos de 10 segs
