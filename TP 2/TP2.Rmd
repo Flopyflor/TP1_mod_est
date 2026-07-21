@@ -18,6 +18,7 @@ library(tidytext)
 library(forcats)
 library(patchwork)
 
+
 # result='hide' oculta tmb el resultado del chunk
 ```
 
@@ -32,6 +33,18 @@ titles <- read.csv("titles_train.csv",
 
 credits <- read.csv("credits_train.csv",
                     stringsAsFactors = FALSE)
+
+# normalizo los paises
+# Función para normalizar una cadena
+normalizar_paises <- function(x) {
+  # Extrae solo las letras mayusculas (los codigos)
+  arrays <- regmatches(x, gregexpr("[A-Z]{2},", x))[[1]]
+  # Ordena y une
+  paste(sort(arrays), collapse = ", ")
+}
+
+titles$production_countries <- sapply(titles$production_countries, normalizar_paises)
+
 ```
 
 
@@ -356,14 +369,131 @@ El efecto de Comedia sobre Score está mediado por Duración, que crea un camino
 
 Para medir el efecto causal promedio, basta medir la asociación, gracias al criterio de la puerta trasera. Bloquear los caminos de acción indirecta permite que el valor real de Comedia y el Score que obtendría dado un valor de Comedia sean independientes, y por lo tanto, la asociación y el efecto causal son iguales. 
 
+Para condicionar por País, nos preguntamos cuál es la diferencia entre la influencia de Gran Bretaña con la de Gran Bretaña y Francia. Decidimos considerarlos como valores distintos.
 
+Al condicionar por duración, decidimos agrupar las duraciones en rangos de 10 minutos, con la consideración de que 10 minutos no es una gran diferencia.
+
+Al agrupar las películas con ciertas condiciones, en general tuvimos grupos chicos. xxxx películas quedaron sin grupo, y las tuvimos que desestimar. *Para los grupos que sí tenían películas, decidimos estimar la esperanza con el estimador bayesiano, porque notamos que teníamos pocos datos para el grupo, pero que estos datos seguían una tendencia común*
+
+*La verdad, no estoy segura de si esto vale. Ya son parte de la misma distribución. Pero bueno, dejé las dos versiones. Vemos que hacemos.*
 
 
 ```{r efecto_causal_directo, echo=FALSE, results="hide"}
 
-# acá entiendo que hay que hacer la esperanza sobre nuestras condicionales, de la esperanza de Score dado comedia = 1 y condicionales = z menos la esperanza de Score dado comedia = 0 y condicionales = z.
+### tomando las duraciones de a grupos de 10 segs
 
 
+# columna extra útil
+titles$comedia = grepl('comedy', titles$genres) + 0
+
+# agrupo según condiciones
+resultado_estratos <- titles %>%
+  # Agrupamos por todas las variables condicionales (Z)
+  group_by(production_countries, release_year, floor(runtime/10)) %>%
+  # Calculamos las medias de Score para comedia == 1 y comedia == 0
+  summarise(
+    media_comedia = mean(imdb_score[comedia == 1], na.rm = TRUE),
+    media_no_comedia = mean(imdb_score[comedia == 0], na.rm = TRUE),
+    # Guardamos el tamaño del estrato
+    n_estrato = n(),
+    .groups = "drop"
+  ) %>%
+  # Calculamos la diferencia (el efecto) dentro de cada estrato z
+  mutate(efecto_z = media_comedia - media_no_comedia)
+
+sum(is.na(resultado_estratos$efecto_z)) #1530 peliculas no asociadas
+
+# Filtramos estratos donde no haya películas en ambos grupos (evita NA)
+resultado_estratos <- resultado_estratos %>%
+  filter(!is.na(efecto_z))
+
+# promedio simple
+ate_simple <- mean(resultado_estratos$efecto_z)
+
+
+```
+
+```{r efecto_causal_directo_bayes, echo=FALSE, results="hide"}
+
+library(fitdistrplus)
+
+
+### tomando las duraciones de a grupos de 10 segs
+
+
+# ajustes al dataset
+#titles$comedia = grepl('comedy', titles$genres) + 0
+titles$imdb_score = titles$imdb_score / 10
+
+# agrupo según condiciones
+resultado_estratos <- titles %>%
+  # Agrupamos por todas las variables condicionales (Z)
+  group_by(production_countries, release_year, floor(runtime/10)) %>%
+  # Calculamos las medias de Score para comedia == 1 y comedia == 0
+  summarise(
+    media_comedia = mean(imdb_score[comedia == 1], na.rm = TRUE),
+    media_no_comedia = mean(imdb_score[comedia == 0], na.rm = TRUE),
+    # Guardamos para bayes
+    sum_score_comedia = sum(imdb_score[comedia == 1]),
+    sum_score_no_comedia = sum(imdb_score[comedia == 0]),
+    n_comedia = sum(comedia == 1),
+    n_no_comedia = sum(comedia == 0),
+    .groups = "drop"
+  )
+
+#cuento pelis sin grupo
+sum(resultado_estratos[resultado_estratos$n_comedia == 0, ]$n_no_comedia) +  sum(resultado_estratos[resultado_estratos$n_no_comedia == 0, ]$n_comedia)
+#1530 peliculas no asociadas
+
+# Filtramos grupos incompletos
+resultado_estratos <- resultado_estratos %>%
+  filter(!(n_comedia == 0 | n_no_comedia == 0))
+
+
+# estimadores bayesianos
+
+# comedia
+fit_data <- resultado_estratos %>%
+  filter(media_comedia > 0, media_comedia < 1) %>%
+  pull(media_comedia)
+
+ajuste_comedia <- fitdist(
+  fit_data,
+  "beta"
+)
+
+alpha0_comedia <- ajuste_comedia$estimate["shape1"]
+beta0_comedia  <- ajuste_comedia$estimate["shape2"]
+
+
+# no comedia
+fit_data <- resultado_estratos %>%
+  filter(media_no_comedia > 0, media_no_comedia < 1) %>%
+  pull(media_no_comedia)
+
+ajuste_no_comedia <- fitdist(
+  fit_data,
+  "beta"
+)
+
+alpha0_no_comedia <- ajuste_no_comedia$estimate["shape1"]
+beta0_no_comedia  <- ajuste_no_comedia$estimate["shape2"]
+
+
+resultado_estratos <- resultado_estratos %>%
+  mutate(
+    media_comedia_EB = (alpha0_comedia + media_comedia) /
+              (alpha0_comedia + beta0_comedia + n_comedia),
+    media_no_comedia_EB = (alpha0_no_comedia + media_no_comedia) /
+              (alpha0_no_comedia + beta0_no_comedia + n_no_comedia)
+  )
+
+# promedio simple
+ate_bayesiano <- mean(resultado_estratos$media_comedia_EB - resultado_estratos$media_no_comedia_EB)
+
+# reajusto
+titles$imdb_score <- titles$imdb_score * 10
+ate_bayesiano <- ate_bayesiano * 10
 
 ```
 
