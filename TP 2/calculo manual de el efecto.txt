@@ -1,0 +1,119 @@
+```{r efecto_causal_directo, echo=FALSE, results="hide"}
+
+### tomando las duraciones de a grupos de 10 segs
+
+
+# columna extra útil
+titles$comedia = grepl('comedy', titles$genres) + 0
+
+# agrupo según condiciones
+resultado_estratos <- titles %>%
+  # Agrupamos por todas las variables condicionales (Z)
+  group_by(production_countries, release_year, floor(runtime/10)) %>%
+  # Calculamos las medias de Score para comedia == 1 y comedia == 0
+  summarise(
+    media_comedia = mean(imdb_score[comedia == 1], na.rm = TRUE),
+    media_no_comedia = mean(imdb_score[comedia == 0], na.rm = TRUE),
+    # Guardamos el tamaño del estrato
+    n_estrato = n(),
+    .groups = "drop"
+  ) %>%
+  # Calculamos la diferencia (el efecto) dentro de cada estrato z
+  mutate(efecto_z = media_comedia - media_no_comedia)
+
+sum(is.na(resultado_estratos$efecto_z)) #1530 peliculas no asociadas
+
+# Filtramos estratos donde no haya películas en ambos grupos (evita NA)
+resultado_estratos <- resultado_estratos %>%
+  filter(!is.na(efecto_z))
+
+# promedio simple
+ate_simple <- mean(resultado_estratos$efecto_z)
+
+
+```
+
+```{r efecto_causal_directo_bayes, echo=FALSE, results="hide"}
+
+library(fitdistrplus) # lo puse acá porque sino los selects tienen que ser dpryl::select
+# esto instala MASS, que tiene otra función select entonces se pisa con dpryl
+
+
+### tomando las duraciones de a grupos de 10 segs
+
+
+# ajustes al dataset
+#titles$comedia = grepl('comedy', titles$genres) + 0
+titles$imdb_score = titles$imdb_score / 10
+
+# agrupo según condiciones
+resultado_estratos <- titles %>%
+  # Agrupamos por todas las variables condicionales (Z)
+  group_by(production_countries, release_year, floor(runtime/10)) %>%
+  # Calculamos las medias de Score para comedia == 1 y comedia == 0
+  summarise(
+    media_comedia = mean(imdb_score[comedia == 1], na.rm = TRUE),
+    media_no_comedia = mean(imdb_score[comedia == 0], na.rm = TRUE),
+    # Guardamos para bayes
+    sum_score_comedia = sum(imdb_score[comedia == 1]),
+    sum_score_no_comedia = sum(imdb_score[comedia == 0]),
+    n_comedia = sum(comedia == 1),
+    n_no_comedia = sum(comedia == 0),
+    .groups = "drop"
+  )
+
+#cuento pelis sin grupo
+sum(resultado_estratos[resultado_estratos$n_comedia == 0, ]$n_no_comedia) +  sum(resultado_estratos[resultado_estratos$n_no_comedia == 0, ]$n_comedia)
+#1530 peliculas no asociadas
+
+# Filtramos grupos incompletos
+resultado_estratos <- resultado_estratos %>%
+  filter(!(n_comedia == 0 | n_no_comedia == 0))
+
+
+# estimadores bayesianos
+
+# comedia
+fit_data <- resultado_estratos %>%
+  filter(media_comedia > 0, media_comedia < 1) %>%
+  pull(media_comedia)
+
+ajuste_comedia <- fitdist(
+  fit_data,
+  "beta"
+)
+
+alpha0_comedia <- ajuste_comedia$estimate["shape1"]
+beta0_comedia  <- ajuste_comedia$estimate["shape2"]
+
+
+# no comedia
+fit_data <- resultado_estratos %>%
+  filter(media_no_comedia > 0, media_no_comedia < 1) %>%
+  pull(media_no_comedia)
+
+ajuste_no_comedia <- fitdist(
+  fit_data,
+  "beta"
+)
+
+alpha0_no_comedia <- ajuste_no_comedia$estimate["shape1"]
+beta0_no_comedia  <- ajuste_no_comedia$estimate["shape2"]
+
+
+resultado_estratos <- resultado_estratos %>%
+  mutate(
+    media_comedia_EB = (alpha0_comedia + media_comedia) /
+              (alpha0_comedia + beta0_comedia + n_comedia),
+    media_no_comedia_EB = (alpha0_no_comedia + media_no_comedia) /
+              (alpha0_no_comedia + beta0_no_comedia + n_no_comedia)
+  )
+
+# promedio simple
+ate_bayesiano <- mean(resultado_estratos$media_comedia_EB - resultado_estratos$media_no_comedia_EB)
+
+# reajusto
+titles$imdb_score <- titles$imdb_score * 10
+ate_bayesiano <- ate_bayesiano * 10
+
+```

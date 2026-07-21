@@ -365,139 +365,32 @@ efecto con una regresión sobre los datos (Comedia sale de genres, Duración de 
 Año de release_year y País de production_countries) y compararlo con la asociación
 cruda de Comedia sobre Score (sin ajustar por nada).
 
-El efecto de Comedia sobre Score está mediado por Duración, que crea un camino siendo cadena. Además, está afectado por País, que crea un camino como cofounder. Al condicionar por Duración, que es collider entre Año y Comedia, se abre el camino Comedia - Duración - Año - Score, por lo que hay que también condicionar por Año. Luego, la forma más clara de medir el efecto causal directo de Comedia sobre Score es condicionando por Duración, País y Año.
 
-Para medir el efecto causal promedio, basta medir la asociación, gracias al criterio de la puerta trasera. Bloquear los caminos de acción indirecta permite que el valor real de Comedia y el Score que obtendría dado un valor de Comedia sean independientes, y por lo tanto, la asociación y el efecto causal son iguales. 
+El efecto de `Comedia` sobre `Score` está mediado por `Duración`, que crea un camino como cadena. Además, está afectado por `País`, que crea un camino como confounder. Al condicionar por `Duración`, que es collider entre `Año` y `Comedia`, se abre el camino `Comedia` -> `Duración` <- `Año` -> `Score`, por lo que hay que también condicionar por `Año`. Entonces, la forma más clara de medir el efecto causal directo de `Comedia` sobre `Score` es condicionando por `Duración`, `País` y `Año`. Dado que todas estas variables son necesarias, y no hay otras en el DAG, este es el único conjunto por el que podemos condicionar para medir el efecto.
 
-Para condicionar por País, nos preguntamos cuál es la diferencia entre la influencia de Gran Bretaña con la de Gran Bretaña y Francia. Decidimos considerarlos como valores distintos.
+Luego, vamos a medir la asociacion entre las variables, realizando una regresión lineal. Primero hacemo una regresión en la que ponemos a `Score` en función de las variables `Comedia`, `País`, `Año` y `Duración`. Al condicionar por este conjunto (además de `Comedia`), logro independencia entre el Score si fuera `Comedia` y la variable `Comedia`. Esto nos permite decir que el índice de asociacion es igual al efecto causal promedio.
 
-Al condicionar por duración, decidimos agrupar las duraciones en rangos de 10 minutos, con la consideración de que 10 minutos no es una gran diferencia.
+Por otro lado, al hacer una regrasión entre `Comedia` y `Score`, podemos calcular la asociacion entre las variables.
+ 
+El coeficiente asociado a `Comedia` en el modelo más simple nos dio $-0.20632$, mientras que en el modelo con más variables dio $-0.1911522$. Esto implica que el que una película sea de comedia generalmente causa que tenga peor `Score`, pero no tanto como uno podría asumir si no considerara otras variables.
 
-Al agrupar las películas con ciertas condiciones, en general tuvimos grupos chicos. xxxx películas quedaron sin grupo, y las tuvimos que desestimar. *Para los grupos que sí tenían películas, decidimos estimar la esperanza con el estimador bayesiano, porque notamos que teníamos pocos datos para el grupo, pero que estos datos seguían una tendencia común*
-
-*La verdad, no estoy segura de si esto vale. Ya son parte de la misma distribución. Pero bueno, dejé las dos versiones. Vemos que hacemos.*
-
-
-```{r efecto_causal_directo, echo=FALSE, results="hide"}
-
-### tomando las duraciones de a grupos de 10 segs
-
-
-# columna extra útil
+```{r calculo_con_regresion, echo=FALSE, results="hide"}
 titles$comedia = grepl('comedy', titles$genres) + 0
 
-# agrupo según condiciones
-resultado_estratos <- titles %>%
-  # Agrupamos por todas las variables condicionales (Z)
-  group_by(production_countries, release_year, floor(runtime/10)) %>%
-  # Calculamos las medias de Score para comedia == 1 y comedia == 0
-  summarise(
-    media_comedia = mean(imdb_score[comedia == 1], na.rm = TRUE),
-    media_no_comedia = mean(imdb_score[comedia == 0], na.rm = TRUE),
-    # Guardamos el tamaño del estrato
-    n_estrato = n(),
-    .groups = "drop"
-  ) %>%
-  # Calculamos la diferencia (el efecto) dentro de cada estrato z
-  mutate(efecto_z = media_comedia - media_no_comedia)
+modelo_ajustado = lm(data = titles, imdb_score ~ comedia + production_countries + runtime + release_year)
+modelo_crudo = lm(data = titles, imdb_score ~ comedia)
 
-sum(is.na(resultado_estratos$efecto_z)) #1530 peliculas no asociadas
+summary(modelo_ajustado)
 
-# Filtramos estratos donde no haya películas en ambos grupos (evita NA)
-resultado_estratos <- resultado_estratos %>%
-  filter(!is.na(efecto_z))
+modelo_ajustado$coefficients['comedia']
+#estimate     error     tval
+# -0.1911522  0.0396124  -4.826
 
-# promedio simple
-ate_simple <- mean(resultado_estratos$efecto_z)
-
+summary(modelo_crudo)
+modelo_crudo$coefficients['comedia']
+# -0.20632    0.03909  -5.278   pr>t : 1.38e-07 ***
 
 ```
-
-```{r efecto_causal_directo_bayes, echo=FALSE, results="hide"}
-
-library(fitdistrplus) # lo puse acá porque sino los selects tienen que ser dpryl::select
-# esto instala MASS, que tiene otra función select entonces se pisa con dpryl
-
-
-### tomando las duraciones de a grupos de 10 segs
-
-
-# ajustes al dataset
-#titles$comedia = grepl('comedy', titles$genres) + 0
-titles$imdb_score = titles$imdb_score / 10
-
-# agrupo según condiciones
-resultado_estratos <- titles %>%
-  # Agrupamos por todas las variables condicionales (Z)
-  group_by(production_countries, release_year, floor(runtime/10)) %>%
-  # Calculamos las medias de Score para comedia == 1 y comedia == 0
-  summarise(
-    media_comedia = mean(imdb_score[comedia == 1], na.rm = TRUE),
-    media_no_comedia = mean(imdb_score[comedia == 0], na.rm = TRUE),
-    # Guardamos para bayes
-    sum_score_comedia = sum(imdb_score[comedia == 1]),
-    sum_score_no_comedia = sum(imdb_score[comedia == 0]),
-    n_comedia = sum(comedia == 1),
-    n_no_comedia = sum(comedia == 0),
-    .groups = "drop"
-  )
-
-#cuento pelis sin grupo
-sum(resultado_estratos[resultado_estratos$n_comedia == 0, ]$n_no_comedia) +  sum(resultado_estratos[resultado_estratos$n_no_comedia == 0, ]$n_comedia)
-#1530 peliculas no asociadas
-
-# Filtramos grupos incompletos
-resultado_estratos <- resultado_estratos %>%
-  filter(!(n_comedia == 0 | n_no_comedia == 0))
-
-
-# estimadores bayesianos
-
-# comedia
-fit_data <- resultado_estratos %>%
-  filter(media_comedia > 0, media_comedia < 1) %>%
-  pull(media_comedia)
-
-ajuste_comedia <- fitdist(
-  fit_data,
-  "beta"
-)
-
-alpha0_comedia <- ajuste_comedia$estimate["shape1"]
-beta0_comedia  <- ajuste_comedia$estimate["shape2"]
-
-
-# no comedia
-fit_data <- resultado_estratos %>%
-  filter(media_no_comedia > 0, media_no_comedia < 1) %>%
-  pull(media_no_comedia)
-
-ajuste_no_comedia <- fitdist(
-  fit_data,
-  "beta"
-)
-
-alpha0_no_comedia <- ajuste_no_comedia$estimate["shape1"]
-beta0_no_comedia  <- ajuste_no_comedia$estimate["shape2"]
-
-
-resultado_estratos <- resultado_estratos %>%
-  mutate(
-    media_comedia_EB = (alpha0_comedia + media_comedia) /
-              (alpha0_comedia + beta0_comedia + n_comedia),
-    media_no_comedia_EB = (alpha0_no_comedia + media_no_comedia) /
-              (alpha0_no_comedia + beta0_no_comedia + n_no_comedia)
-  )
-
-# promedio simple
-ate_bayesiano <- mean(resultado_estratos$media_comedia_EB - resultado_estratos$media_no_comedia_EB)
-
-# reajusto
-titles$imdb_score <- titles$imdb_score * 10
-ate_bayesiano <- ate_bayesiano * 10
-
-```
-
 
 3. Selección de modelos. Dividir el conjunto de datos en entrenamiento y testeo (tam
 bién pueden usar otra técnica, como validación cruzada). Con todas las variables dispo
@@ -506,20 +399,32 @@ cuadrático medio (MSE) de cada uno. Entre los modelos candidatos deben incluir 
 sí al menos un modelo de efectos mixtos y una regresión con splines. Elegir el modelo
 que minimice el MSE de predicción para el rating de IMDB.
 
-Cinco modelos: efectos mixtos, regresión con splines, lineal?, uhh bayes (previa semi normal)?, idk??
+Cinco modelos: lineal, efectos mixtos, regresión con splines, Random Forest, XGBoost
 
 Ideas de modelos (en teoria todos se pueden hacer en R)
 
-- Regresión lineal
-- GAM (es una extensión de la regresión con splines y suele funcionar mejor.)
-- Efectos mixtos
+-- Regresión lineal
+-- GAM (es una extensión de la regresión con splines y suele funcionar mejor.)
+-- Efectos mixtos
 - Elastic Net (regresión lineal que usa Ridge y Lasso,)
-- Random Forest (arma muchos árboles de decisión sobre distintas muestras aleatorias de los datos y combina sus predicciones)
-- XGBoost (gradient boosting - construye árboles de decisión de manera secuencial, donde cada árbol intenta corregir los errores del anterior)
+-- Random Forest (arma muchos árboles de decisión sobre distintas muestras aleatorias de los datos y combina sus predicciones)
+-- XGBoost (gradient boosting - construye árboles de decisión de manera secuencial, donde cada árbol intenta corregir los errores del anterior)
 - BART (modelo bayesiano que representa la respuesta como la suma de muchos árboles de decisión pequeños, permitiendo modelar relaciones complejas mientras cuantifica la incertidumbre de las predicciones)
 - AutoML (técnica que automatiza el proceso de selección del mejor modelo y de sus hiperparámetros, probando distintos algoritmos y configuraciones)
 
 
+
+
+
+
+Random Forest (Flor)
+```{r modelos, echo=FALSE, results="hide"}
+
+# implementar modelo (?) por ahí toca definir cosas con STAN.
+
+```
+
+XGBoost (Flor)
 
 ```{r modelos, echo=FALSE, results="hide"}
 
@@ -538,6 +443,12 @@ voy a computar el error cuadrático medio de cada equipo, y gana el que tenga el
 ```{r nuestras_predicciones, echo=FALSE, results="hide"}
 
 # hacer las predicciones
+
+titles_test <- read.csv("titles_test.csv",
+                   stringsAsFactors = FALSE)
+
+credits_test <- read.csv("credits_test.csv",
+                   stringsAsFactors = FALSE)
 
 ```
 
