@@ -38,7 +38,7 @@ credits <- read.csv("credits_train.csv",
 # Función para normalizar una cadena
 normalizar_paises <- function(x) {
   # Extrae solo las letras mayusculas (los codigos)
-  arrays <- regmatches(x, gregexpr("[A-Z]{2},", x))[[1]]
+  arrays <- regmatches(x, gregexpr("'[A-Z]{2}'", x))[[1]]
   # Ordena y une
   paste(sort(arrays), collapse = ", ")
 }
@@ -419,47 +419,39 @@ Ideas de modelos (en teoria todos se pueden hacer en R)
 
 #### Random Forest
 
-Luego, vamos a ajustar un modelo de Random Forest.
-```{r random_forest, echo=FALSE, results="hide"}
-library(randomForest)
-set.seed(1)
+El modelo Random Forest funciona de la siguiente forma. Primero se toma la muestra original. Digamos que vamos a hacer $t$ árboles. Entonces, hacemos $t$ versiones Bootstrap de la muestra, es decir, si la muestra tiene $n$ observaciones, tomamos $n$ observaciones con reposición. Luego, para cada muestra bootstrapeada construimos un árbol. Para contruirlo, en cada paso vamos a tomar un subconjunto de tamaño $m$ de las $p$ variables que componen la observación, y vamos a generar el nodo que mejor divide la muestra en función de esas variables, tomando distintas variables en cada paso del árbol hasta completarlo. Finalmente tenemos $t$ árboles distintos.
 
-# hay varios que son strings...
-model <- randomForest(imdb_score ~ release_year + runtime ,
-                      ntree = 500, # trees to build
-                      mtry = 4 #predictor vars to consider at each node
-                      ) # faltan mil cosas
+Para predecir un nuevo valor, cada árbol hace su predicción, y luego se promedia el resultado (o, si es categórica, se elige la categoría con más votos).
+```{r aux_factorizar_listas, echo=FALSE, results="hide"}
+library(dplyr)
+library(purrr)
+library(stringr)
 
-model
-
-#find number of trees that produce lowest test MSE
-which.min(model$mse)
-
-#find RMSE of best model
-sqrt(model$mse[which.min(model$mse)]) 
-
-plot(model) # nos da el MSE dado la cant de trees
-
-#produce variable importance plot
-varImpPlot(model) 
-
-
-model_tuned <- tuneRF(
-               x=c(titles$release_year, titles$runtime), #define predictor variables
-               y=titles$imdb_score, #define response variable
-               ntreeTry=500, 
-               mtryStart=4,  
-               stepFactor=1.5, #The factor to increase by until the out-of-bag estimated error stops improving by a certain amount.
-               improve=0.01, #The amount that the out-of-bag error needs to improve by to keep increasing the step factor.
-               trace=FALSE #don't show real-time progress
-               )
-
-
-predict(model, newdata=new)
-
-
-# questions: how to cross validate
-# how to consider string vars
+crear_dummies <- function(datos, columna) {
+  # Limpiar los caracteres especiales: [, ], \' y espacios
+  cat_limpias <- datos[[columna]] %>%
+    str_remove_all("\\[|\\]|'") %>% 
+    str_split(",\\s*") # Separar por coma
+  
+  # Extraer todas las categorías únicas que existen en el dataset
+  todas_las_cat <- unique(unlist(cat_limpias))
+  todas_las_cat <- todas_las_cat[todas_las_cat != ""] # Quitar vacíos
+  
+  # Crear una columna por cada categoria indicando 1 si está presente y 0 si no
+  columnas_dummy <- map_dfc(todas_las_cat, function(g) {
+    # Evalúa si el género 'g' está presente en cada fila
+    presente <- map_lgl(cat_limpias, ~ g %in% .x)
+    
+    # Devuelve una columna con nombre cat_<nombre_cat>
+    tibble(!!paste0(columna, '_', g) := as.integer(presente))
+    # el !! hace que se evalue la función en vez de nombrar la columna paste0()
+    # el := para que se de cuenta de que tengo el nombre de la columna y dps el vector que le asigno
+  })
+  
+  # 4. Unir las nuevas columnas al dataframe original
+  datos <- datos %>% dplyr::select(-all_of(columna))
+  bind_cols(datos, columnas_dummy)
+}
 ```
 
 ```{r random_forest_frecuencias, echo=FALSE, results="hide"}
@@ -472,36 +464,38 @@ library(ranger) # Motor eficiente de Random Forest en R
 
 set.seed(123)
 
-titles <- read.csv("titles_train.csv",
+titles_rf <- read.csv("titles_train.csv",
                    stringsAsFactors = FALSE) # new, clean
 
-titles$production_countries <- sapply(titles$production_countries, normalizar_paises)
+titles_rf <- crear_dummies(titles_rf, 'genres')
 
-# -------------------------------------------------------------------------
-# 2. División Train/Test y Configuración de Cross Validation
-# -------------------------------------------------------------------------
-#split <- initial_split(titles, prop = 0.8)
-#train_data <- training(split)
-#test_data  <- testing(split)
-# esto es una linda forma de separarlo... pero no sé si hace falta en este caso
+titles_rf <- crear_dummies(titles_rf, 'production_countries')
+
 
 # Definimos K-Fold Cross Validation (p. ej. 5 folds)
-cv_folds <- vfold_cv(titles, v = 5)
+cv_folds <- vfold_cv(titles_rf, v = 5)
 
 # -------------------------------------------------------------------------
 # 3. Receta de Preprocesamiento (Mezcla de Texto + Numéricas)
 # -------------------------------------------------------------------------
-receta <- recipe(score ~ ., data = titles) %>%
-  # A. Procesamiento de Texto:
+receta <- recipe(imdb_score ~ . - id, data = titles_rf) %>%
+  # Procesamiento de Texto:
   step_tokenize(description) %>%                           # Separar en palabras
-  step_stopwords(description, language = "en") %>%         # Quitar palabras comunes ("de", "un", "el")
+  step_stopwords(description, language = "en") %>%         # Sacar palabras comunes
   step_tokenfilter(description, max_tokens = 50) %>%      # Quedarse con las N palabras más frecuentes
   step_tfidf(description) %>%                             # Convertir a matriz TF-IDF
   
-  # B. Procesamiento de Variables Categóricas:
+  step_tokenize(title) %>%
+  step_stopwords(title, language = "en") %>%
+  step_tokenfilter(title, max_tokens = 10) %>%
+  step_tfidf(title) %>% 
+  
+  # agregar un procesamiento de actores
+  
+  # Procesamiento de Variables Categóricas:
   step_dummy(all_nominal_predictors()) %>%
   
-  # C. Limpieza general:
+  # Limpieza general:
   step_zv(all_predictors()) # Eliminar columnas con varianza cero (constantes)
 
 # -------------------------------------------------------------------------
@@ -509,8 +503,8 @@ receta <- recipe(score ~ ., data = titles) %>%
 # -------------------------------------------------------------------------
 rf_spec <- rand_forest(
   trees = 500,
-  mtry = tune(),      # Parámetro a ajustar mediante CV (opcional)
-  min_n = tune()     # Parámetro a ajustar mediante CV (opcional)
+  mtry = 3 # tune(),      # Parámetro a ajustar mediante CV (opcional)
+  #min_n =      # Parámetro a ajustar mediante CV (opcional)
 ) %>%
   set_engine("ranger", importance = "impurity") %>%
   set_mode("regression")
@@ -554,6 +548,50 @@ final_fit <- last_fit(final_wf, split)
 # Métricas finales en el conjunto de prueba (Test set independiente)
 collect_metrics(final_fit)
 ```
+
+```{r random_forest, echo=FALSE, results="hide"}
+library(randomForest)
+set.seed(1)
+
+# hay varios que son strings...
+model <- randomForest(imdb_score ~ release_year + runtime ,
+                      ntree = 500, # trees to build
+                      mtry = 4 #predictor vars to consider at each node
+                      ) # faltan mil cosas
+
+model
+
+#find number of trees that produce lowest test MSE
+which.min(model$mse)
+
+#find RMSE of best model
+sqrt(model$mse[which.min(model$mse)]) 
+
+plot(model) # nos da el MSE dado la cant de trees
+
+#produce variable importance plot
+varImpPlot(model) 
+
+
+model_tuned <- tuneRF(
+               x=c(titles$release_year, titles$runtime), #define predictor variables
+               y=titles$imdb_score, #define response variable
+               ntreeTry=500, 
+               mtryStart=4,  
+               stepFactor=1.5, #The factor to increase by until the out-of-bag estimated error stops improving by a certain amount.
+               improve=0.01, #The amount that the out-of-bag error needs to improve by to keep increasing the step factor.
+               trace=FALSE #don't show real-time progress
+               )
+
+
+predict(model, newdata=new)
+
+
+# questions: how to cross validate
+# how to consider string vars
+```
+
+
 
 XGBoost (Flor)
 
