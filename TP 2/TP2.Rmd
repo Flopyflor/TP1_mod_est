@@ -900,22 +900,41 @@ preparar_folds_credits <- function(folds, receta, credits_actores, credits_direc
  
 #===========================================================
 # 9. Evaluar UN modelo (sin tuning) sobre folds ya preparados
+#
+#    construir_wf: función opcional (model_spec, train_baked) -> workflow.
+#    Por defecto arma workflow() + add_formula(imdb_score ~ .) + add_model(),
+#    que sirve para la mayoría de los modelos (lm, random forest, etc).
+#    Para modelos que necesitan una fórmula especial (ej. GAM con s()),
+#    se le pasa un constructor distinto (ver ejemplo de GAM más abajo).
 #===========================================================
+ 
+construir_wf_formula <- function(model_spec, train_baked){
+    workflow() %>%
+        add_formula(imdb_score ~ .) %>%
+        add_model(model_spec)
+}
  
 evaluar_modelo_cv <- function(model_spec,
                               folds_preparados,
-                              metricas = metric_set(rmse, mse, rsq)){
+                              metricas = metric_set(rmse, mse, rsq),
+                              construir_wf = construir_wf_formula,
+                              guardar_fits = FALSE){
+ 
+    fits_guardados <- list()
  
     resultados_folds <- map_dfr(
-        folds_preparados,
-        function(fold_data){
+        seq_along(folds_preparados),
+        function(i){
  
-            wf <-
-                workflow() %>%
-                add_formula(imdb_score ~ .) %>%
-                add_model(model_spec)
+            fold_data <- folds_preparados[[i]]
+ 
+            wf <- construir_wf(model_spec, fold_data$train_baked)
  
             modelo_fit <- fit(wf, data = fold_data$train_baked)
+ 
+            if (guardar_fits) {
+                fits_guardados[[fold_data$fold]] <<- modelo_fit
+            }
  
             preds <-
                 predict(modelo_fit, new_data = fold_data$test_baked) %>%
@@ -939,7 +958,8 @@ evaluar_modelo_cv <- function(model_spec,
     list(
         por_fold = resultados_folds,
         resumen  = resumen,
-        mse      = resumen %>% filter(.metric == "mse") %>% pull(mean)
+        mse      = resumen %>% filter(.metric == "mse") %>% pull(mean),
+        fits     = fits_guardados   # vacío si guardar_fits = FALSE
     )
 }
  
@@ -953,7 +973,8 @@ evaluar_modelo_cv <- function(model_spec,
 tune_grid_manual <- function(model_spec,
                              grid,
                              folds_preparados,
-                             metricas = metric_set(rmse, mae, rsq)){
+                             metricas = metric_set(rmse, mae, rsq),
+                             construir_wf = construir_wf_formula){
  
     map_dfr(
         seq_len(nrow(grid)),
@@ -964,7 +985,9 @@ tune_grid_manual <- function(model_spec,
             # Reemplaza los tune() del model_spec por los valores de esta fila
             modelo_actual <- rlang::exec(set_args, model_spec, !!!as.list(params_g))
  
-            resultado_g <- evaluar_modelo_cv(modelo_actual, folds_preparados, metricas)
+            resultado_g <- evaluar_modelo_cv(
+                modelo_actual, folds_preparados, metricas, construir_wf
+            )
  
             # Pega los hiperparámetros de esta fila a cada métrica del resumen
             bind_cols(
@@ -1018,6 +1041,78 @@ print(mse_lm)
 
 
 ```
+
+#### GAM (splines)
+
+```{r gam, echo=FALSE, warning=FALSE, message=FALSE}
+ 
+# GAM necesita s() en las variables continuas "de verdad" (no en dummies
+# 0/1 ni en las columnas de TF-IDF, que quedan como términos lineales).
+# Como los nombres de columnas pueden variar un poco entre folds (según
+# qué categorías/tokens pasaron el umbral en step_dummy/step_tokenfilter
+# de ESE fold), la fórmula se arma dinámicamente a partir de train_baked.
+ 
+construir_formula_gam <- function(train_baked,
+                                  vars_suaves = c(
+                                      "imdb_votes", "runtime", "release_year",
+                                      "n_actores", "n_directores",
+                                      "actor_mean_score", "actor_max_score",
+                                      "director_mean_score", "director_max_score"
+                                  ),
+                                  k_suavizado = 5){
+ 
+    vars_todas    <- setdiff(names(train_baked), "imdb_score")
+    vars_suaves   <- intersect(vars_suaves, vars_todas)   # por si algún fold no las tiene
+    vars_lineales <- setdiff(vars_todas, vars_suaves)
+ 
+    terminos_suaves   <- sprintf("s(%s, k = %d)", vars_suaves, k_suavizado)
+    terminos_lineales <- sprintf("`%s`", vars_lineales)   # backticks por nombres raros (tfidf, dummies con espacios)
+ 
+    as.formula(
+        paste("imdb_score ~", paste(c(terminos_suaves, terminos_lineales), collapse = " + "))
+    )
+}
+ 
+construir_wf_gam <- function(model_spec, train_baked){
+    workflow() %>%
+        add_variables(outcomes = imdb_score, predictors = everything()) %>%
+        add_model(model_spec, formula = construir_formula_gam(train_baked))
+}
+ 
+gam_spec <-
+    gen_additive_mod() %>%
+    set_engine("mgcv") %>%
+    set_mode("regression")
+ 
+cv_gam <- evaluar_modelo_cv(
+    gam_spec,
+    folds_preparados,           # reutiliza los mismos folds ya preparados
+    construir_wf = construir_wf_gam,
+    guardar_fits = TRUE          # necesario para poder ver el EDF después
+)
+ 
+print(cv_gam$resumen)
+ 
+#-------------------------------------------------------------
+# Ver el EDF (effective degrees of freedom) de cada s()
+#-------------------------------------------------------------
+
+edf_por_fold <-
+    map_dfr(
+        names(cv_gam$fits),
+        function(nombre_fold){
+            cv_gam$fits[[nombre_fold]] %>%
+                extract_fit_engine() %>%
+                broom::tidy() %>%
+                mutate(fold = nombre_fold)
+        }
+    )
+ 
+print(edf_por_fold)
+
+```
+
+
 
 <!--
 
