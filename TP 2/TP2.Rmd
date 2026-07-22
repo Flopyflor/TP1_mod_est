@@ -17,7 +17,10 @@ library(stringr)
 library(tidytext)
 library(forcats)
 library(patchwork)
-
+library(tidymodels)
+library(textrecipes)
+library(stopwords)
+library(readr)
 
 # result='hide' oculta tmb el resultado del chunk
 ```
@@ -38,7 +41,7 @@ credits <- read.csv("credits_train.csv",
 # Función para normalizar una cadena
 normalizar_paises <- function(x) {
   # Extrae solo las letras mayusculas (los codigos)
-  arrays <- regmatches(x, gregexpr("'[A-Z]{2}'", x))[[1]]
+  arrays <- regmatches(x, gregexpr("[A-Z]{2}", x))[[1]]
   # Ordena y une
   paste(sort(arrays), collapse = ", ")
 }
@@ -46,7 +49,6 @@ normalizar_paises <- function(x) {
 titles$production_countries <- sapply(titles$production_countries, normalizar_paises)
 
 ```
-
 
 ## Exploración inicial
 
@@ -412,10 +414,669 @@ Ideas de modelos (en teoria todos se pueden hacer en R)
 - BART (modelo bayesiano que representa la respuesta como la suma de muchos árboles de decisión pequeños, permitiendo modelar relaciones complejas mientras cuantifica la incertidumbre de las predicciones)
 - AutoML (técnica que automatiza el proceso de selección del mejor modelo y de sus hiperparámetros, probando distintos algoritmos y configuraciones)
 
+<!--
+
+1. Variables numéricas: runtime, release_year, seasons, imdb_votes
+
+2. Variables categóricas: type, age_certification, genres, production_countries
+
+3. Variables de texto: title, description
+
+-->
+
+#### Preprocesamiento
+
+```{r preprocesameinto, include=FALSE}
+
+#===========================================================
+# 1. Función para crear variables binarias
+#===========================================================
+
+crear_dummies_lista <- function(data,
+                                columna,
+                                prefijo,
+                                min_frecuencia,
+                                es_lista = TRUE){
+
+    columna <- rlang::ensym(columna)
+
+    #---------------------------------------------------
+    # Función auxiliar para procesar la columna
+    #---------------------------------------------------
+
+    procesar_columna <- function(x){
+
+        x <- replace_na(x, "")
+
+        if(es_lista){
+            x <- str_remove_all(x, "\\[|\\]|'")
+        }
+
+        x <- if_else(str_trim(x) == "", "Unknown", x)
+
+        str_split(x, ",")
+    }
+
+    #---------------------------------------------------
+    # Categorías frecuentes
+    #---------------------------------------------------
+
+    categorias <-
+        data %>%
+        select(id, !!columna) %>%
+        mutate(
+            valor = procesar_columna(!!columna)
+        ) %>%
+        unnest(valor) %>%
+        mutate(valor = str_trim(valor)) %>%
+        count(valor) %>%
+        filter(n >= min_frecuencia) %>%
+        pull(valor)
+
+    #---------------------------------------------------
+    # Expandir categorías
+    #---------------------------------------------------
+
+    data_long <-
+        data %>%
+        select(id, !!columna) %>%
+        mutate(
+            valor = procesar_columna(!!columna)
+        ) %>%
+        unnest(valor) %>%
+        mutate(valor = str_trim(valor)) %>%
+        mutate(
+            valor = if_else(
+                valor %in% categorias,
+                valor,
+                "Other"
+            )
+        )
+
+    #---------------------------------------------------
+    # Crear variables dummy
+    #---------------------------------------------------
+
+   dummies <-
+      data_long %>%
+      distinct(id, valor) %>%
+      mutate(value = 1) %>%
+      pivot_wider(
+          names_from = valor,
+          values_from = value,
+          values_fill = 0,
+          names_prefix = paste0(prefijo, "_")
+      )
+
+    #---------------------------------------------------
+    # Unir al dataset original
+    #---------------------------------------------------
+
+    data %>%
+        select(-!!columna) %>%
+        left_join(dummies, by = "id") %>%
+        mutate(
+            across(
+                starts_with(prefijo),
+                ~ replace_na(.x, 0)
+            )
+        )
+}
+
+#===========================================================
+# 2. Genres
+#===========================================================
+
+titles <-
+    crear_dummies_lista(
+        titles,
+        genres,
+        "genre",
+        min_frecuencia = 20,
+        es_lista = TRUE
+    )
+
+#===========================================================
+# 3. Production countries
+#===========================================================
+
+titles <-
+    crear_dummies_lista(
+        titles,
+        production_countries,
+        "country",
+        min_frecuencia = 30,
+        es_lista = FALSE
+    )
+
+
+#===========================================================
+# 4. Features de credits que NO usan imdb_score
+#    (se calculan una sola vez, sin fuga)
+#===========================================================
+
+
+# Revisa los valores reales antes de filtrar:
+# unique(credits$role)
+ 
+credits_actores    <- credits %>% filter(role == "ACTOR")
+credits_directores <- credits %>% filter(role == "DIRECTOR")
+ 
+# ---- n_actores / n_directores por película ----
+ 
+n_actores_pelicula <-
+    credits_actores %>%
+    distinct(id, person_id) %>%
+    count(id, name = "n_actores")
+ 
+n_directores_pelicula <-
+    credits_directores %>%
+    distinct(id, person_id) %>%
+    count(id, name = "n_directores")
+ 
+titles <- titles %>%
+    left_join(n_actores_pelicula, by = "id") %>%
+    left_join(n_directores_pelicula, by = "id") %>%
+    mutate(
+        n_actores    = replace_na(n_actores, 0),
+        n_directores = replace_na(n_directores, 0)
+    )
+ 
+# ---- actor_popular / director_popular ----
+# Definidos como: la cantidad de películas del elenco/dirección más "prolífico"
+# de esa película (podés cambiar max() por sum() o mean() si preferís otra definición)
+
+# Top 10% de actores más prolíficos
+top10_actores <-
+    credits_actores %>%
+    distinct(id, person_id) %>%
+    count(person_id, name = "n_peliculas") %>%
+    arrange(desc(n_peliculas)) %>%
+    slice_head(prop = 0.10) %>%
+    pull(person_id)
+
+# Top 10% de directores más prolíficos
+top10_directores <-
+    credits_directores %>%
+    distinct(id, person_id) %>%
+    count(person_id, name = "n_peliculas") %>%
+    arrange(desc(n_peliculas)) %>%
+    slice_head(prop = 0.10) %>%
+    pull(person_id)
+
+# Cantidad de actores populares por película
+actor_popular_pelicula <-
+    credits_actores %>%
+    distinct(id, person_id) %>%
+    mutate(
+        actor_popular = person_id %in% top10_actores
+    ) %>%
+    group_by(id) %>%
+    summarise(
+        actor_popular = sum(actor_popular),
+        .groups = "drop"
+    )
+
+# Cantidad de directores populares por película
+director_popular_pelicula <-
+    credits_directores %>%
+    distinct(id, person_id) %>%
+    mutate(
+        director_popular = person_id %in% top10_directores
+    ) %>%
+    group_by(id) %>%
+    summarise(
+        director_popular = sum(director_popular),
+        .groups = "drop"
+    )
+
+
+titles <-
+    titles %>%
+    left_join(actor_popular_pelicula, by = "id") %>%
+    left_join(director_popular_pelicula, by = "id") %>%
+    mutate(
+        actor_popular    = replace_na(actor_popular, 0),
+        director_popular = replace_na(director_popular, 0)
+    )
+ 
+#===========================================================
+# 5. Placeholders para las features que SÍ usan imdb_score
+#    (se llenan de verdad más abajo, fold por fold; acá solo
+#    necesitamos que existan como columnas para que recipe()
+#    las registre como predictoras)
+#===========================================================
+ 
+titles <- titles %>%
+    mutate(
+        actor_mean_score    = 0,
+        actor_max_score     = 0,
+        director_mean_score = 0,
+        director_max_score  = 0
+    )
+
+#===========================================================
+# 6. Receta base
+#===========================================================
+
+titles <- titles %>%
+    filter(!is.na(imdb_votes)) %>%
+    mutate(
+        seasons = replace_na(seasons, 0)
+    )
+
+receta_base <-
+
+recipe(
+    imdb_score ~ .,
+    data = titles
+) %>%
+  
+
+step_rm(id) %>% 
+
+#----------------------------------------------------
+# TITLE
+#----------------------------------------------------
+
+step_tokenize(title) %>%
+step_stopwords(title) %>%
+step_stem(title) %>%
+step_tokenfilter(
+    title,
+    min_times = 5
+) %>%
+step_tfidf(title) %>%
+
+#----------------------------------------------------
+# DESCRIPTION
+#----------------------------------------------------
+
+step_tokenize(description) %>%
+step_stopwords(description) %>%
+step_stem(description) %>%
+step_tokenfilter(
+    description,
+    min_times = 10,
+    max_tokens = 300
+) %>%
+step_tfidf(description) %>%
+
+#----------------------------------------------------
+# Variables categóricas
+#----------------------------------------------------
+
+step_unknown(all_nominal_predictors()) %>%
+step_dummy(
+    all_nominal_predictors()
+) %>%
+
+#----------------------------------------------------
+# Eliminar columnas constantes
+#----------------------------------------------------
+
+step_zv(
+    all_predictors()
+)
+
+
+#----------------------------------------------------
+# Folds
+#----------------------------------------------------
+
+set.seed(123)
+
+# Los mismos folds para TODOS los modelos
+cv_folds <- vfold_cv(titles, v = 5)
+
+
+#===========================================================
+# 7. Funciones para calcular las features de actor/director
+#    SIN fuga.
+#
+#    Ojo con un detalle importante: no alcanza con calcular el
+#    promedio solo con analysis_set y aplicarlo tal cual a
+#    analysis_set, porque para una fila de entrenamiento el
+#    promedio de SU PROPIO actor incluye el score de esa misma
+#    película (fuga dentro del propio fold de análisis, más
+#    grave cuanto menos películas tenga el actor).
+#
+#    Por eso separamos:
+#      - calcular_stats_credits(): junta suma y n por actor/
+#        director, usando SOLO analysis_set.
+#      - aplicar_features_credits(..., leave_one_out = TRUE):
+#        para las filas de ENTRENAMIENTO, excluye el score de
+#        la propia película del promedio (leave-one-out).
+#      - aplicar_features_credits(..., leave_one_out = FALSE):
+#        para las filas de TEST, usa el promedio completo del
+#        train (no hace falta excluir nada, esas películas no
+#        participaron del cálculo).
+#===========================================================
+ 
+calcular_stats_credits <- function(data_analysis, credits_actores, credits_directores){
+ 
+    stats_actor <-
+        credits_actores %>%
+        distinct(id, person_id) %>%
+        inner_join(data_analysis %>% select(id, imdb_score), by = "id") %>%
+        group_by(person_id) %>%
+        summarise(
+            suma_actor = sum(imdb_score, na.rm = TRUE),
+            n_actor    = n(),
+            .groups = "drop"
+        )
+ 
+    stats_director <-
+        credits_directores %>%
+        distinct(id, person_id) %>%
+        inner_join(data_analysis %>% select(id, imdb_score), by = "id") %>%
+        group_by(person_id) %>%
+        summarise(
+            suma_director = sum(imdb_score, na.rm = TRUE),
+            n_director    = n(),
+            .groups = "drop"
+        )
+ 
+    list(
+        stats_actor    = stats_actor,
+        stats_director = stats_director,
+        fallback       = mean(data_analysis$imdb_score, na.rm = TRUE)
+    )
+}
+ 
+aplicar_features_credits <- function(data_target,
+                                     stats,
+                                     credits_actores,
+                                     credits_directores,
+                                     leave_one_out){
+ 
+    # ----- Actor -----
+    actor_join <-
+        credits_actores %>%
+        distinct(id, person_id) %>%
+        semi_join(data_target, by = "id") %>%
+        left_join(data_target %>% select(id, imdb_score), by = "id") %>%
+        left_join(stats$stats_actor, by = "person_id") %>%
+        mutate(
+            promedio_imdb_actor = case_when(
+                is.na(n_actor)                     ~ stats$fallback,       # actor nunca visto en analysis
+                leave_one_out & n_actor > 1         ~ (suma_actor - imdb_score) / (n_actor - 1),
+                leave_one_out & n_actor <= 1        ~ stats$fallback,       # única observación es la propia
+                TRUE                                ~ suma_actor / n_actor  # test: promedio completo del train
+            )
+        )
+ 
+    actor_score_pelicula <-
+        actor_join %>%
+        group_by(id) %>%
+        summarise(
+            actor_mean_score = mean(promedio_imdb_actor, na.rm = TRUE),
+            actor_max_score  = max(promedio_imdb_actor, na.rm = TRUE),
+            .groups = "drop"
+        )
+ 
+    # ----- Director (misma lógica) -----
+    director_join <-
+        credits_directores %>%
+        distinct(id, person_id) %>%
+        semi_join(data_target, by = "id") %>%
+        left_join(data_target %>% select(id, imdb_score), by = "id") %>%
+        left_join(stats$stats_director, by = "person_id") %>%
+        mutate(
+            promedio_imdb_director = case_when(
+                is.na(n_director)                   ~ stats$fallback,
+                leave_one_out & n_director > 1       ~ (suma_director - imdb_score) / (n_director - 1),
+                leave_one_out & n_director <= 1      ~ stats$fallback,
+                TRUE                                 ~ suma_director / n_director
+            )
+        )
+ 
+    director_score_pelicula <-
+        director_join %>%
+        group_by(id) %>%
+        summarise(
+            director_mean_score = mean(promedio_imdb_director, na.rm = TRUE),
+            director_max_score  = max(promedio_imdb_director, na.rm = TRUE),
+            .groups = "drop"
+        )
+ 
+    data_target %>%
+        select(-actor_mean_score, -actor_max_score, -director_mean_score, -director_max_score) %>%
+        left_join(actor_score_pelicula, by = "id") %>%
+        left_join(director_score_pelicula, by = "id") %>%
+        mutate(
+            actor_mean_score    = replace_na(actor_mean_score, stats$fallback),
+            actor_max_score     = replace_na(actor_max_score, stats$fallback),
+            director_mean_score = replace_na(director_mean_score, stats$fallback),
+            director_max_score  = replace_na(director_max_score, stats$fallback)
+        )
+}
+ 
+#===========================================================
+# 8. Preparar los folds UNA SOLA VEZ
+#    (features de credits + prep/bake de la receta por fold).
+#    Esto no depende del modelo ni de los hiperparámetros,
+#    así que no hay que recalcularlo para cada combinación
+#    de una grilla de tuning.
+#===========================================================
+ 
+preparar_folds_credits <- function(folds, receta, credits_actores, credits_directores){
+ 
+    map(
+        seq_along(folds$splits),
+        function(i){
+ 
+            split          <- folds$splits[[i]]
+            analysis_set   <- analysis(split)
+            assessment_set <- assessment(split)
+ 
+            # Stats de actor/director SOLO con el fold de análisis
+            stats <- calcular_stats_credits(
+                analysis_set, credits_actores, credits_directores
+            )
+ 
+            # Train: leave-one-out (excluye el score de la propia película)
+            analysis_set <- aplicar_features_credits(
+                analysis_set, stats, credits_actores, credits_directores,
+                leave_one_out = TRUE
+            )
+ 
+            # Test: promedio completo calculado con el train
+            assessment_set <- aplicar_features_credits(
+                assessment_set, stats, credits_actores, credits_directores,
+                leave_one_out = FALSE
+            )
+ 
+            receta_prep <- prep(receta, training = analysis_set)
+ 
+            list(
+                train_baked = juice(receta_prep),
+                test_baked  = bake(receta_prep, new_data = assessment_set),
+                fold        = paste0("Fold", i)
+            )
+        }
+    )
+}
+ 
+#===========================================================
+# 9. Evaluar UN modelo (sin tuning) sobre folds ya preparados
+#===========================================================
+ 
+evaluar_modelo_cv <- function(model_spec,
+                              folds_preparados,
+                              metricas = metric_set(rmse, mse, rsq)){
+ 
+    resultados_folds <- map_dfr(
+        folds_preparados,
+        function(fold_data){
+ 
+            wf <-
+                workflow() %>%
+                add_formula(imdb_score ~ .) %>%
+                add_model(model_spec)
+ 
+            modelo_fit <- fit(wf, data = fold_data$train_baked)
+ 
+            preds <-
+                predict(modelo_fit, new_data = fold_data$test_baked) %>%
+                bind_cols(fold_data$test_baked %>% select(imdb_score))
+ 
+            metricas(preds, truth = imdb_score, estimate = .pred) %>%
+                mutate(fold = fold_data$fold)
+        }
+    )
+ 
+    resumen <-
+        resultados_folds %>%
+        group_by(.metric) %>%
+        summarise(
+            mean    = mean(.estimate),
+            n       = n(),
+            std_err = sd(.estimate) / sqrt(n),
+            .groups = "drop"
+        )
+ 
+    list(
+        por_fold = resultados_folds,
+        resumen  = resumen,
+        mse      = resumen %>% filter(.metric == "mse") %>% pull(mean)
+    )
+}
+ 
+#===========================================================
+# 10. Tuning de hiperparámetros (equivalente a tune_grid())
+#     sobre folds ya preparados. Para cada fila de la grilla,
+#     actualiza los argumentos del model_spec y evalúa en
+#     todos los folds.
+#===========================================================
+ 
+tune_grid_manual <- function(model_spec,
+                             grid,
+                             folds_preparados,
+                             metricas = metric_set(rmse, mae, rsq)){
+ 
+    map_dfr(
+        seq_len(nrow(grid)),
+        function(g){
+ 
+            params_g <- grid[g, ]
+ 
+            # Reemplaza los tune() del model_spec por los valores de esta fila
+            modelo_actual <- rlang::exec(set_args, model_spec, !!!as.list(params_g))
+ 
+            resultado_g <- evaluar_modelo_cv(modelo_actual, folds_preparados, metricas)
+ 
+            # Pega los hiperparámetros de esta fila a cada métrica del resumen
+            bind_cols(
+                params_g[rep(1, nrow(resultado_g$resumen)), , drop = FALSE],
+                resultado_g$resumen
+            )
+        }
+    )
+}
+
+
+# Preparamos los folds UNA VEZ (se puede reutilizar para todos los modelos
+# que usen la misma receta_base, sin recalcular las features de credits)
+folds_preparados <- preparar_folds_credits(
+    cv_folds, receta_base, credits_actores, credits_directores
+)
+
+```
 
 
 
 
+#### Regresión lineal (Baseline)
+
+
+```{r regresion_lineal, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Modelo
+
+modelo_lm <-
+    linear_reg() %>%
+    set_engine("lm")
+
+
+
+# Validación cruzada
+
+cv_lm <- evaluar_modelo_cv(modelo_lm, folds_preparados)
+
+# Resultados
+
+metricas_lm <- cv_lm$resumen
+
+print(metricas_lm)
+
+
+# MSE
+
+mse_lm <- cv_lm$mse
+print(mse_lm)
+
+
+```
+
+<!--
+
+#### Random Forest (con tuning de hiperparámetros)
+```{r random_forest, echo=FALSE, warning=FALSE, message=FALSE}
+ 
+rf_spec <-
+    rand_forest(
+        trees = 500,
+        mtry  = tune(),
+        min_n = tune()
+    ) %>%
+    set_engine("ranger", importance = "impurity") %>%
+    set_mode("regression")
+ 
+rf_grid <-
+    grid_regular(
+        mtry(range = c(2, 10)),
+        min_n(range = c(2, 5)),
+        levels = 3
+    )
+ 
+# Reutiliza folds_preparados (misma receta, no hace falta recalcular
+# las features de credits ni el prep/bake)
+cv_results <- tune_grid_manual(
+    model_spec       = rf_spec,
+    grid             = rf_grid,
+    folds_preparados = folds_preparados,
+    metricas         = metric_set(rmse, mae, rsq)
+)
+ 
+print(cv_results)
+ 
+# Mejores hiperparámetros según RMSE (equivalente a select_best())
+best_params <-
+    cv_results %>%
+    filter(.metric == "rmse") %>%
+    arrange(mean) %>%
+    slice(1)
+ 
+print(best_params)
+ 
+# Modelo final con los mejores hiperparámetros, ajustado en TODOS los folds
+# (o, si querés el modelo de producción, ver nota más abajo para
+# entrenarlo con todo `titles`)
+rf_spec_final <-
+    rand_forest(
+        trees = 500,
+        mtry  = best_params$mtry,
+        min_n = best_params$min_n
+    ) %>%
+    set_engine("ranger", importance = "impurity") %>%
+    set_mode("regression")
+ 
+cv_rf_final <- evaluar_modelo_cv(rf_spec_final, folds_preparados, metric_set(rmse, mae, rsq))
+print(cv_rf_final$resumen)
+```
+
+-->
 
 #### Random Forest
 
