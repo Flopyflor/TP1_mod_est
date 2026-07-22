@@ -417,16 +417,147 @@ Ideas de modelos (en teoria todos se pueden hacer en R)
 
 
 
-Random Forest (Flor)
-```{r modelos, echo=FALSE, results="hide"}
+#### Random Forest
 
-# implementar modelo (?) por ahí toca definir cosas con STAN.
+Luego, vamos a ajustar un modelo de Random Forest.
+```{r random_forest, echo=FALSE, results="hide"}
+library(randomForest)
+set.seed(1)
 
+# hay varios que son strings...
+model <- randomForest(imdb_score ~ release_year + runtime ,
+                      ntree = 500, # trees to build
+                      mtry = 4 #predictor vars to consider at each node
+                      ) # faltan mil cosas
+
+model
+
+#find number of trees that produce lowest test MSE
+which.min(model$mse)
+
+#find RMSE of best model
+sqrt(model$mse[which.min(model$mse)]) 
+
+plot(model) # nos da el MSE dado la cant de trees
+
+#produce variable importance plot
+varImpPlot(model) 
+
+
+model_tuned <- tuneRF(
+               x=c(titles$release_year, titles$runtime), #define predictor variables
+               y=titles$imdb_score, #define response variable
+               ntreeTry=500, 
+               mtryStart=4,  
+               stepFactor=1.5, #The factor to increase by until the out-of-bag estimated error stops improving by a certain amount.
+               improve=0.01, #The amount that the out-of-bag error needs to improve by to keep increasing the step factor.
+               trace=FALSE #don't show real-time progress
+               )
+
+
+predict(model, newdata=new)
+
+
+# questions: how to cross validate
+# how to consider string vars
+```
+
+```{r random_forest_frecuencias, echo=FALSE, results="hide"}
+# Instalar si no los tienes:
+# install.packages(c("tidymodels", "textrecipes", "ranger", "stopwords"))
+
+library(tidymodels)
+library(textrecipes)
+library(ranger) # Motor eficiente de Random Forest en R
+
+set.seed(123)
+
+titles <- read.csv("titles_train.csv",
+                   stringsAsFactors = FALSE) # new, clean
+
+titles$production_countries <- sapply(titles$production_countries, normalizar_paises)
+
+# -------------------------------------------------------------------------
+# 2. División Train/Test y Configuración de Cross Validation
+# -------------------------------------------------------------------------
+#split <- initial_split(titles, prop = 0.8)
+#train_data <- training(split)
+#test_data  <- testing(split)
+# esto es una linda forma de separarlo... pero no sé si hace falta en este caso
+
+# Definimos K-Fold Cross Validation (p. ej. 5 folds)
+cv_folds <- vfold_cv(titles, v = 5)
+
+# -------------------------------------------------------------------------
+# 3. Receta de Preprocesamiento (Mezcla de Texto + Numéricas)
+# -------------------------------------------------------------------------
+receta <- recipe(score ~ ., data = titles) %>%
+  # A. Procesamiento de Texto:
+  step_tokenize(description) %>%                           # Separar en palabras
+  step_stopwords(description, language = "en") %>%         # Quitar palabras comunes ("de", "un", "el")
+  step_tokenfilter(description, max_tokens = 50) %>%      # Quedarse con las N palabras más frecuentes
+  step_tfidf(description) %>%                             # Convertir a matriz TF-IDF
+  
+  # B. Procesamiento de Variables Categóricas:
+  step_dummy(all_nominal_predictors()) %>%
+  
+  # C. Limpieza general:
+  step_zv(all_predictors()) # Eliminar columnas con varianza cero (constantes)
+
+# -------------------------------------------------------------------------
+# 4. Especificación del Modelo Random Forest
+# -------------------------------------------------------------------------
+rf_spec <- rand_forest(
+  trees = 500,
+  mtry = tune(),      # Parámetro a ajustar mediante CV (opcional)
+  min_n = tune()     # Parámetro a ajustar mediante CV (opcional)
+) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("regression")
+
+# Unimos receta y modelo en un Workflow
+wf <- workflow() %>%
+  add_recipe(receta) %>%
+  add_model(rf_spec)
+
+# -------------------------------------------------------------------------
+# 5. Evaluación con Cross Validation (Ajustando hiperparámetros)
+# -------------------------------------------------------------------------
+# Definimos la grilla de parámetros para el tuning
+rf_grid <- grid_regular(
+  mtry(range = c(2, 10)),
+  min_n(range = c(2, 5)),
+  levels = 3
+)
+
+# Ejecutamos CV en la grilla de parámetros
+cv_results <- tune_grid(
+  wf,
+  resamples = cv_folds,
+  grid = rf_grid,
+  metrics = metric_set(rmse, mae, rsq)
+)
+
+# -------------------------------------------------------------------------
+# 6. Resultados y Modelo Final
+# -------------------------------------------------------------------------
+# Ver las mejores métricas del Cross Validation
+collect_metrics(cv_results)
+
+# Seleccionar los mejores hiperparámetros basándonos en RMSE
+best_params <- select_best(cv_results, metric = "rmse")
+
+# Finalizar el workflow con los mejores parámetros y entrenar en el test set
+final_wf <- finalize_workflow(wf, best_params)
+final_fit <- last_fit(final_wf, split)
+
+# Métricas finales en el conjunto de prueba (Test set independiente)
+collect_metrics(final_fit)
 ```
 
 XGBoost (Flor)
 
-```{r modelos, echo=FALSE, results="hide"}
+```{r xgBoost, echo=FALSE, results="hide"}
 
 # implementar modelo (?) por ahí toca definir cosas con STAN.
 
