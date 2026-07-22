@@ -426,8 +426,9 @@ Ideas de modelos (en teoria todos se pueden hacer en R)
 
 #### Preprocesamiento
 
-```{r preprocesameinto, include=FALSE}
+Primero que nada, decidimos preparar los datos para ser usados. En el dataset original tenemos las columnas `production_countries` y `genres`, que contienen arrays con los valores que aplican a la película. Esto es difícil de trabajar, y se pierde la noción de que una película hecha en `['GB']` está relacionada con una hecha en `['GB', 'FR']`. Luego, cambiamos el dataset para que tenga una columna por categoría, y la variable es binaria según si aplica o no. Para las películas en las que no se sabía, se marcó la columna `Unknown`, y si la película pertenecía a un género o país poco popular (con menos de 30 apariciones en el dataset), se lo consideró como 'Otro'.
 
+```{r preprocesameinto_dummies, include=FALSE}
 #===========================================================
 # 1. Función para crear variables binarias
 #===========================================================
@@ -549,6 +550,11 @@ titles <-
         es_lista = FALSE
     )
 
+```
+
+Por otro lado, queríamos incorporar algo de los datos de la tabla de créditos. Al fin y al cabo, los actores y el director presentes en una película influyen en su éxito. Primero agregamos a nuestras métricas por película la cantidad de actores y directores que la hicieron. Por otro lado, estudiamos la totalidad de nuestros datos (nuestro universo), y definimos al grupo de actores y directores "populares" como el 10% que participó en más películas. Así generamos otra métrica, cantidad de actores (o directores) populares por película.
+
+```{r preprocesamiento_credits, echo=FALSE, results='hide'}
 
 #===========================================================
 # 4. Features de credits que NO usan imdb_score
@@ -573,6 +579,7 @@ n_directores_pelicula <-
     credits_directores %>%
     distinct(id, person_id) %>%
     count(id, name = "n_directores")
+
  
 titles <- titles %>%
     left_join(n_actores_pelicula, by = "id") %>%
@@ -585,6 +592,8 @@ titles <- titles %>%
 # ---- actor_popular / director_popular ----
 # Definidos como: la cantidad de películas del elenco/dirección más "prolífico"
 # de esa película (podés cambiar max() por sum() o mean() si preferís otra definición)
+
+
 
 # Top 10% de actores más prolíficos
 top10_actores <-
@@ -639,6 +648,12 @@ titles <-
         actor_popular    = replace_na(actor_popular, 0),
         director_popular = replace_na(director_popular, 0)
     )
+
+```
+
+También queríamos tener alguna medida de actores (y directores) "buenos", y usar esa información en nuestras predicciones. En este caso, decidimos calcular para cada persona su `Score` promedio, sacado de las películas en las que participó, y luego para cada película el promedio de los `Scores` de sus actores y directores, y el `Score` máximo.
+
+```{r preprocesamiento_credits_scores}
  
 #===========================================================
 # 5. Placeholders para las features que SÍ usan imdb_score
@@ -655,6 +670,12 @@ titles <- titles %>%
         director_max_score  = 0
     )
 
+```
+
+Por último, para trabajar con los campos de texto de nuestro dataset, en este caso `title` y `descripción`, decidimos usar TF-IDF. El proceso es así: primero se separa el campo en palabras (tokeniza). Luego se extraen las palabras más comunes (como "in" o "the"), y se las lleva a su raíz (por ejemplo, los plurales se vuelven singulares). Luego nos quedamos con las palabras más comúnes, y les aplicamos el algoritmo TF-IDF. Este algorítmo calcula la frecuencia de una palabra en su propio texto, y la compara con su frecuencia en el total de los textos. De esta forma determina las palabras clave de un texto, y usa esto para sus predicciones.
+
+
+```{r receta, echo=FALSE, results='hide'}
 #===========================================================
 # 6. Receta base
 #===========================================================
@@ -729,7 +750,11 @@ set.seed(123)
 # Los mismos folds para TODOS los modelos
 cv_folds <- vfold_cv(titles, v = 5)
 
+```
 
+Para las variables calculadas a partir del total de los datos (las palabras frecuentes, los actores buenos y populares), es importante evitar cometer data leakage. Esto ocurre cuando usamos datos de test para entrenar nuestro modelo, o en este caso, armar las variables. En nuestro caso, con cross validation, vamos a calcular estos valores para cada fold.
+
+```{r preprocesamiento_sin_fuga}
 #===========================================================
 # 7. Funciones para calcular las features de actor/director
 #    SIN fuga.
