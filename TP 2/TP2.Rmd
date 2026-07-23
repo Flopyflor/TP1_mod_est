@@ -21,6 +21,7 @@ library(tidymodels)
 library(textrecipes)
 library(stopwords)
 library(readr)
+library(multilevelmod)   # engine "lmer" para linear_reg()
 
 # result='hide' oculta tmb el resultado del chunk
 ```
@@ -527,39 +528,40 @@ Consideramos que tenemos variables numéricas (runtime, release_year, seasons, i
 Primero que nada, decidimos preparar los datos para ser usados. En el dataset original tenemos las columnas `production_countries` y `genres`, que contienen arrays con los valores que aplican a la película. Esto es difícil de trabajar, y se pierde la noción de que una película hecha en `['GB']` está relacionada con una hecha en `['GB', 'FR']`. Luego, cambiamos el dataset para que tenga una columna por categoría, y la variable es binaria según si aplica o no. Para las películas en las que no se sabía, se marcó la columna `Unknown`, y si la película pertenecía a un género o país poco popular (con menos de 30 apariciones en el dataset), se lo consideró como 'Otro'.
 
 ```{r preprocesameinto_dummies, include=FALSE}
-#===========================================================
-# 1. Función para crear variables binarias
-#===========================================================
 
+#===========================================================
+# 1. Función para crear variables binarias (igual que antes)
+#===========================================================
+ 
 crear_dummies_lista <- function(data,
                                 columna,
                                 prefijo,
                                 min_frecuencia,
                                 es_lista = TRUE){
-
+ 
     columna <- rlang::ensym(columna)
-
+ 
     #---------------------------------------------------
     # Función auxiliar para procesar la columna
     #---------------------------------------------------
-
+ 
     procesar_columna <- function(x){
-
+ 
         x <- replace_na(x, "")
-
+ 
         if(es_lista){
             x <- str_remove_all(x, "\\[|\\]|'")
         }
-
+ 
         x <- if_else(str_trim(x) == "", "Unknown", x)
-
+ 
         str_split(x, ",")
     }
-
+ 
     #---------------------------------------------------
     # Categorías frecuentes
     #---------------------------------------------------
-
+ 
     categorias <-
         data %>%
         select(id, !!columna) %>%
@@ -571,11 +573,11 @@ crear_dummies_lista <- function(data,
         count(valor) %>%
         filter(n >= min_frecuencia) %>%
         pull(valor)
-
+ 
     #---------------------------------------------------
     # Expandir categorías
     #---------------------------------------------------
-
+ 
     data_long <-
         data %>%
         select(id, !!columna) %>%
@@ -591,11 +593,11 @@ crear_dummies_lista <- function(data,
                 "Other"
             )
         )
-
+ 
     #---------------------------------------------------
     # Crear variables dummy
     #---------------------------------------------------
-
+ 
    dummies <-
       data_long %>%
       distinct(id, valor) %>%
@@ -606,11 +608,11 @@ crear_dummies_lista <- function(data,
           values_fill = 0,
           names_prefix = paste0(prefijo, "_")
       )
-
+ 
     #---------------------------------------------------
     # Unir al dataset original
     #---------------------------------------------------
-
+ 
     data %>%
         select(-!!columna) %>%
         left_join(dummies, by = "id") %>%
@@ -621,11 +623,11 @@ crear_dummies_lista <- function(data,
             )
         )
 }
-
+ 
 #===========================================================
 # 2. Genres
 #===========================================================
-
+ 
 titles <-
     crear_dummies_lista(
         titles,
@@ -634,11 +636,11 @@ titles <-
         min_frecuencia = 20,
         es_lista = TRUE
     )
-
+ 
 #===========================================================
 # 3. Production countries
 #===========================================================
-
+ 
 titles <-
     crear_dummies_lista(
         titles,
@@ -677,7 +679,6 @@ n_directores_pelicula <-
     credits_directores %>%
     distinct(id, person_id) %>%
     count(id, name = "n_directores")
-
  
 titles <- titles %>%
     left_join(n_actores_pelicula, by = "id") %>%
@@ -690,8 +691,6 @@ titles <- titles %>%
 # ---- actor_popular / director_popular ----
 # Definidos como: la cantidad de películas del elenco/dirección más "prolífico"
 # de esa película (podés cambiar max() por sum() o mean() si preferís otra definición)
-
-
 
 # Top 10% de actores más prolíficos
 top10_actores <-
@@ -747,6 +746,55 @@ titles <-
         director_popular = replace_na(director_popular, 0)
     )
 
+pop_directores <-
+    credits_directores %>%
+    distinct(id, person_id) %>%
+    count(person_id, name = "n_pelis_director")
+
+
+#===========================================================
+# 4.b. director_principal: UN director por película
+#    (para usar como variable de agrupamiento en el modelo
+#    mixto). No usa imdb_score -> se calcula una sola vez.
+#
+#    Regla:
+#    1. Si la película no tiene ningún director acreditado
+#       (o ninguno con nombre válido) -> "Unknown"
+#    2. Si tiene uno o más directores válidos -> nos quedamos
+#       con el más "popular" (n_pelis_director más alto)
+#    3. Si hay empate en popularidad (o todos son primerizos,
+#       n_pelis_director = 1) -> elegimos uno al azar entre
+#       los empatados
+#===========================================================
+ 
+set.seed(123)
+ 
+director_principal_pelicula <-
+    credits_directores %>%
+    distinct(id, person_id, name) %>%
+    filter(!is.na(person_id), !is.na(name), str_trim(name) != "") %>%
+    left_join(pop_directores, by = "person_id") %>%
+    mutate(n_pelis_director = replace_na(n_pelis_director, 0)) %>%
+    group_by(id) %>%
+    slice_max(n_pelis_director, n = 1, with_ties = TRUE) %>%  # el/los más popular(es)
+    slice_sample(n = 1) %>%                                    # desempate al azar
+    ungroup() %>%
+    transmute(id, director_principal = as.character(person_id))
+ 
+titles <- titles %>%
+    left_join(director_principal_pelicula, by = "id") %>%
+    mutate(director_principal = replace_na(director_principal, "Unknown"))
+
+#===========================================================
+# 4.c. Variables que NO son predictores fijos
+#    (grouping vars de modelos mixtos, ids, etc). Se define UNA
+#    sola vez acá y se reutiliza en todas las funciones que arman
+#    fórmulas, para no tener que acordarse de excluirla a mano en
+#    cada modelo nuevo que se agregue.
+#===========================================================
+ 
+VARS_NO_PREDICTORAS <- c("director_principal")
+
 ```
 
 También queríamos tener alguna medida de actores (y directores) "buenos", y usar esa información en nuestras predicciones. En este caso, decidimos calcular para cada persona su `Score` promedio, sacado de las películas en las que participó, y luego para cada película el promedio de los `Scores` de sus actores y directores, y el `Score` máximo. Como esta información depende de nuestra variable a calcular, no podemos usar el total de la información de nuestro dataset y después usar cross validation, porque estaríamos usando la respuesta para predecir la respuesta. Por eso, estas variables las vamos a calcular para cada fold.
@@ -774,6 +822,7 @@ Por último, para trabajar con los campos de texto de nuestro dataset, en este c
 
 
 ```{r receta, echo=FALSE, results='hide'}
+
 #===========================================================
 # 6. Receta base
 #===========================================================
@@ -793,6 +842,12 @@ recipe(
   
 
 step_rm(id) %>% 
+# director_principal NO es un predictor fijo: es la variable de
+# agrupamiento del modelo mixto. Le cambiamos el rol para que
+# step_unknown/step_dummy (que operan sobre all_nominal_predictors())
+# la ignoren, pero siga viajando intacta hasta juice()/bake().
+  
+update_role(director_principal, new_role = "grupo_mixto") %>%
 
 #----------------------------------------------------
 # TITLE
@@ -853,6 +908,7 @@ cv_folds <- vfold_cv(titles, v = 5)
 
 
 ```{r preprocesamiento_sin_fuga}
+
 #===========================================================
 # 7. Funciones para calcular las features de actor/director
 #    SIN fuga.
@@ -978,6 +1034,7 @@ aplicar_features_credits <- function(data_target,
 ```
 
 ```{r preprocesamiento_calc_folds, results='hide', echo=FALSE}
+
 #===========================================================
 # 8. Preparar los folds UNA SOLA VEZ
 #    (features de credits + prep/bake de la receta por fold).
@@ -1038,16 +1095,35 @@ preparar_folds_credits <- function(folds, receta, credits_actores, credits_direc
 #    se le pasa un constructor distinto (ver ejemplo de GAM más abajo).
 #===========================================================
  
-construir_wf_formula <- function(model_spec, train_baked){
+construir_wf_formula <- function(model_spec, train_baked, excluir = VARS_NO_PREDICTORAS){
+ 
+    # OJO: update_role() en la receta saca a director_principal de
+    # all_nominal_predictors() (para que step_dummy no la toque adentro
+    # de la receta), pero la columna sigue estando en train_baked. Si acá
+    # usáramos add_formula(imdb_score ~ .), el "." la agarra igual y
+    # model.matrix() la dummifica en cientos de columnas (una por director).
+    # Por eso armamos la fórmula a mano, excluyéndola.
+ 
+    vars_predictoras <- setdiff(names(train_baked), c("imdb_score", excluir))
+ 
+    formula_modelo <- as.formula(
+        paste("imdb_score ~", paste(sprintf("`%s`", vars_predictoras), collapse = " + "))
+    )
+ 
     workflow() %>%
-        add_formula(imdb_score ~ .) %>%
+        add_formula(formula_modelo) %>%
         add_model(model_spec)
+}
+ 
+predecir_estandar <- function(modelo_fit, test_baked){
+    predict(modelo_fit, new_data = test_baked) %>% pull(.pred)
 }
  
 evaluar_modelo_cv <- function(model_spec,
                               folds_preparados,
                               metricas = metric_set(rmse, mse, rsq),
                               construir_wf = construir_wf_formula,
+                              funcion_predict = predecir_estandar,
                               guardar_fits = FALSE){
  
     fits_guardados <- list()
@@ -1067,8 +1143,10 @@ evaluar_modelo_cv <- function(model_spec,
             }
  
             preds <-
-                predict(modelo_fit, new_data = fold_data$test_baked) %>%
-                bind_cols(fold_data$test_baked %>% select(imdb_score))
+                tibble(
+                    .pred      = funcion_predict(modelo_fit, fold_data$test_baked),
+                    imdb_score = fold_data$test_baked$imdb_score
+                )
  
             metricas(preds, truth = imdb_score, estimate = .pred) %>%
                 mutate(fold = fold_data$fold)
@@ -1089,13 +1167,14 @@ evaluar_modelo_cv <- function(model_spec,
         por_fold = resultados_folds,
         resumen  = resumen,
         mse      = resumen %>% filter(.metric == "mse") %>% pull(mean),
-        fits     = fits_guardados   # vacío si guardar_fits = FALSE
+        fits     = fits_guardados
     )
 }
 
 ```
 
 ```{r tune_hiperparametros, results='hide', echo=FALSE}
+
 #===========================================================
 # 10. Tuning de hiperparámetros (equivalente a tune_grid())
 #     sobre folds ya preparados. Para cada fila de la grilla,
@@ -1134,6 +1213,7 @@ tune_grid_manual <- function(model_spec,
 
 # Preparamos los folds UNA VEZ (se puede reutilizar para todos los modelos
 # que usen la misma receta_base, sin recalcular las features de credits)
+
 folds_preparados <- preparar_folds_credits(
     cv_folds, receta_base, credits_actores, credits_directores
 )
@@ -1168,8 +1248,8 @@ print(metricas_lm)
 # MSE
 
 mse_lm <- cv_lm$mse
-print(mse_lm)
 
+print(mse_lm)
 
 ```
 
@@ -1192,7 +1272,7 @@ construir_formula_gam <- function(train_baked,
                                   ),
                                   k_suavizado = 5){
  
-    vars_todas    <- setdiff(names(train_baked), "imdb_score")
+    vars_todas    <- setdiff(names(train_baked), c("imdb_score", VARS_NO_PREDICTORAS))
     vars_suaves   <- intersect(vars_suaves, vars_todas)   # por si algún fold no las tiene
     vars_lineales <- setdiff(vars_todas, vars_suaves)
  
@@ -1244,6 +1324,68 @@ print(edf_por_fold)
 ```
 
 
+#### Modelo mixto (lmer)
+
+```{r modelo_mixto, echo=FALSE, warning=FALSE, message=FALSE}
+ 
+
+ 
+# La fórmula lleva todos los predictores como efectos fijos, más
+# (1 | director_principal) como intercepto aleatorio. Se arma
+# dinámicamente porque los nombres de columnas (dummies, tfidf)
+# pueden variar levemente entre folds.
+ 
+construir_formula_mixto <- function(train_baked, var_grupo = VARS_NO_PREDICTORAS[1]){
+ 
+    vars_fijas <- setdiff(names(train_baked), c("imdb_score", var_grupo))
+ 
+    as.formula(
+        paste(
+            "imdb_score ~",
+            paste(sprintf("`%s`", vars_fijas), collapse = " + "),
+            sprintf("+ (1 | %s)", var_grupo)
+        )
+    )
+}
+ 
+construir_wf_mixto <- function(model_spec, train_baked){
+    workflow() %>%
+        add_variables(outcomes = imdb_score, predictors = everything()) %>%
+        add_model(model_spec, formula = construir_formula_mixto(train_baked))
+}
+ 
+# La mayoría de los directores aparecen en 1-2 películas, así que en
+# el assessment_set de cada fold es MUY probable encontrar directores
+# que lmer nunca vio en el train de ese fold ("new levels"). Por eso
+# no podemos usar predecir_estandar(): hay que ir directo al objeto
+# lme4 y pasarle allow.new.levels = TRUE (si no, lmer tira error en
+# vez de predecir con el efecto aleatorio en 0, es decir, cayendo al
+# efecto fijo general para esos directores nuevos).
+ 
+predecir_mixto <- function(modelo_fit, test_baked){
+    modelo_lmer <- extract_fit_engine(modelo_fit)
+    predict(modelo_lmer, newdata = test_baked, allow.new.levels = TRUE)
+}
+ 
+modelo_mixto_spec <-
+    linear_reg() %>%
+    set_engine("lmer")
+ 
+cv_mixto <- evaluar_modelo_cv(
+    modelo_mixto_spec,
+    folds_preparados,
+    construir_wf    = construir_wf_mixto,
+    funcion_predict = predecir_mixto,
+    guardar_fits    = TRUE
+)
+ 
+print(cv_mixto$resumen)
+ 
+# Varianza explicada por el efecto aleatorio de director
+# (cuanto más grande frente a la varianza residual, más "peso"
+# tiene el director como fuente de variación)
+summary(extract_fit_engine(cv_mixto$fits[["Fold1"]]))
+```
 
 #### Random Forest
 
