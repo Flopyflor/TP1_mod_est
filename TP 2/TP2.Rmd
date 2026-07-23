@@ -651,7 +651,7 @@ titles <-
 
 ```
 
-También queríamos tener alguna medida de actores (y directores) "buenos", y usar esa información en nuestras predicciones. En este caso, decidimos calcular para cada persona su `Score` promedio, sacado de las películas en las que participó, y luego para cada película el promedio de los `Scores` de sus actores y directores, y el `Score` máximo.
+También queríamos tener alguna medida de actores (y directores) "buenos", y usar esa información en nuestras predicciones. En este caso, decidimos calcular para cada persona su `Score` promedio, sacado de las películas en las que participó, y luego para cada película el promedio de los `Scores` de sus actores y directores, y el `Score` máximo. Como esta información depende de nuestra variable a calcular, no podemos usar el total de la información de nuestro dataset y después usar cross validation, porque estaríamos usando la respuesta para predecir la respuesta. Por eso, estas variables las vamos a calcular para cada fold.
 
 ```{r preprocesamiento_credits_scores}
  
@@ -752,7 +752,7 @@ cv_folds <- vfold_cv(titles, v = 5)
 
 ```
 
-Para las variables calculadas a partir del total de los datos (las palabras frecuentes, los actores buenos y populares), es importante evitar cometer data leakage. Esto ocurre cuando usamos datos de test para entrenar nuestro modelo, o en este caso, armar las variables. En nuestro caso, con cross validation, vamos a calcular estos valores para cada fold.
+
 
 ```{r preprocesamiento_sin_fuga}
 #===========================================================
@@ -787,7 +787,7 @@ calcular_stats_credits <- function(data_analysis, credits_actores, credits_direc
         group_by(person_id) %>%
         summarise(
             suma_actor = sum(imdb_score, na.rm = TRUE),
-            n_actor    = n(),
+            n_actor    = n(), # esto es cantidad de peliculas en la que estuvo
             .groups = "drop"
         )
  
@@ -798,7 +798,7 @@ calcular_stats_credits <- function(data_analysis, credits_actores, credits_direc
         group_by(person_id) %>%
         summarise(
             suma_director = sum(imdb_score, na.rm = TRUE),
-            n_director    = n(),
+            n_director    = n(),  # esto es cantidad de peliculas en la que estuvo
             .groups = "drop"
         )
  
@@ -877,6 +877,9 @@ aplicar_features_credits <- function(data_target,
         )
 }
  
+```
+
+```{r preprocesamiento_calc_folds, results='hide', echo=FALSE}
 #===========================================================
 # 8. Preparar los folds UNA SOLA VEZ
 #    (features de credits + prep/bake de la receta por fold).
@@ -922,6 +925,10 @@ preparar_folds_credits <- function(folds, receta, credits_actores, credits_direc
         }
     )
 }
+
+```
+
+```{r cross_validate, results='hide', echo=FALSE}
  
 #===========================================================
 # 9. Evaluar UN modelo (sin tuning) sobre folds ya preparados
@@ -987,7 +994,10 @@ evaluar_modelo_cv <- function(model_spec,
         fits     = fits_guardados   # vacío si guardar_fits = FALSE
     )
 }
- 
+
+```
+
+```{r tune_hiperparametros, results='hide', echo=FALSE}
 #===========================================================
 # 10. Tuning de hiperparámetros (equivalente a tune_grid())
 #     sobre folds ya preparados. Para cada fila de la grilla,
@@ -1031,8 +1041,6 @@ folds_preparados <- preparar_folds_credits(
 )
 
 ```
-
-
 
 
 #### Regresión lineal (Baseline)
@@ -1139,9 +1147,12 @@ print(edf_por_fold)
 
 
 
-<!--
+#### Random Forest
 
-#### Random Forest (con tuning de hiperparámetros)
+El modelo Random Forest funciona de la siguiente forma. Primero se toma la muestra original. Digamos que vamos a hacer $t$ árboles. Entonces, hacemos $t$ versiones Bootstrap de la muestra, es decir, si la muestra tiene $n$ observaciones, tomamos $n$ observaciones con reposición. Luego, para cada muestra bootstrapeada construimos un árbol. Para contruirlo, en cada paso vamos a tomar un subconjunto de tamaño $m$ de las $p$ variables que componen la observación, y vamos a generar el nodo que mejor divide la muestra en función de esas variables, tomando distintas variables en cada paso del árbol hasta completarlo. Finalmente tenemos $t$ árboles distintos.
+
+Para predecir un nuevo valor, cada árbol hace su predicción, y luego se promedia el resultado (o, si es categórica, se elige la categoría con más votos).
+
 ```{r random_forest, echo=FALSE, warning=FALSE, message=FALSE}
  
 rf_spec <-
@@ -1196,189 +1207,67 @@ cv_rf_final <- evaluar_modelo_cv(rf_spec_final, folds_preparados, metric_set(rms
 print(cv_rf_final$resumen)
 ```
 
--->
-
-#### Random Forest
-
-El modelo Random Forest funciona de la siguiente forma. Primero se toma la muestra original. Digamos que vamos a hacer $t$ árboles. Entonces, hacemos $t$ versiones Bootstrap de la muestra, es decir, si la muestra tiene $n$ observaciones, tomamos $n$ observaciones con reposición. Luego, para cada muestra bootstrapeada construimos un árbol. Para contruirlo, en cada paso vamos a tomar un subconjunto de tamaño $m$ de las $p$ variables que componen la observación, y vamos a generar el nodo que mejor divide la muestra en función de esas variables, tomando distintas variables en cada paso del árbol hasta completarlo. Finalmente tenemos $t$ árboles distintos.
-
-Para predecir un nuevo valor, cada árbol hace su predicción, y luego se promedia el resultado (o, si es categórica, se elige la categoría con más votos).
-```{r aux_factorizar_listas, echo=FALSE, results="hide"}
-library(dplyr)
-library(purrr)
-library(stringr)
-
-crear_dummies <- function(datos, columna) {
-  # Limpiar los caracteres especiales: [, ], \' y espacios
-  cat_limpias <- datos[[columna]] %>%
-    str_remove_all("\\[|\\]|'") %>% 
-    str_split(",\\s*") # Separar por coma
-  
-  # Extraer todas las categorías únicas que existen en el dataset
-  todas_las_cat <- unique(unlist(cat_limpias))
-  todas_las_cat <- todas_las_cat[todas_las_cat != ""] # Quitar vacíos
-  
-  # Crear una columna por cada categoria indicando 1 si está presente y 0 si no
-  columnas_dummy <- map_dfc(todas_las_cat, function(g) {
-    # Evalúa si el género 'g' está presente en cada fila
-    presente <- map_lgl(cat_limpias, ~ g %in% .x)
-    
-    # Devuelve una columna con nombre cat_<nombre_cat>
-    tibble(!!paste0(columna, '_', g) := as.integer(presente))
-    # el !! hace que se evalue la función en vez de nombrar la columna paste0()
-    # el := para que se de cuenta de que tengo el nombre de la columna y dps el vector que le asigno
-  })
-  
-  # 4. Unir las nuevas columnas al dataframe original
-  datos <- datos %>% dplyr::select(-all_of(columna))
-  bind_cols(datos, columnas_dummy)
-}
-```
-
-```{r random_forest_frecuencias, echo=FALSE, results="hide"}
-# Instalar si no los tienes:
-# install.packages(c("tidymodels", "textrecipes", "ranger", "stopwords"))
-
-library(tidymodels)
-library(textrecipes)
-library(ranger) # Motor eficiente de Random Forest en R
-
-set.seed(123)
-
-titles_rf <- read.csv("titles_train.csv",
-                   stringsAsFactors = FALSE) # new, clean
-
-titles_rf <- crear_dummies(titles_rf, 'genres')
-
-titles_rf <- crear_dummies(titles_rf, 'production_countries')
 
 
-# Definimos K-Fold Cross Validation (p. ej. 5 folds)
-cv_folds <- vfold_cv(titles_rf, v = 5)
+#### XGBoost
 
-# -------------------------------------------------------------------------
-# 3. Receta de Preprocesamiento (Mezcla de Texto + Numéricas)
-# -------------------------------------------------------------------------
-receta <- recipe(imdb_score ~ . - id, data = titles_rf) %>%
-  # Procesamiento de Texto:
-  step_tokenize(description) %>%                           # Separar en palabras
-  step_stopwords(description, language = "en") %>%         # Sacar palabras comunes
-  step_tokenfilter(description, max_tokens = 50) %>%      # Quedarse con las N palabras más frecuentes
-  step_tfidf(description) %>%                             # Convertir a matriz TF-IDF
-  
-  step_tokenize(title) %>%
-  step_stopwords(title, language = "en") %>%
-  step_tokenfilter(title, max_tokens = 10) %>%
-  step_tfidf(title) %>% 
-  
-  # agregar un procesamiento de actores
-  
-  # Procesamiento de Variables Categóricas:
-  step_dummy(all_nominal_predictors()) %>%
-  
-  # Limpieza general:
-  step_zv(all_predictors()) # Eliminar columnas con varianza cero (constantes)
+XGBoost es otro modelo que usa Bosques, pero de una forma distinta al anterior. En XGBoost vamos a hacer un bosque de residuos, que nos van a permitir ajustar la predicción base, el promedio de los `Scores`.
 
-# -------------------------------------------------------------------------
-# 4. Especificación del Modelo Random Forest
-# -------------------------------------------------------------------------
-rf_spec <- rand_forest(
-  trees = 500,
-  mtry = 3 # tune(),      # Parámetro a ajustar mediante CV (opcional)
-  #min_n =      # Parámetro a ajustar mediante CV (opcional)
-) %>%
-  set_engine("ranger", importance = "impurity") %>%
-  set_mode("regression")
+Nuestros árboles no van a ser completos. Para decidir si un nodo amerita dividirse en dos hojas, vamos a calcular los índices de similitud de los nodos, y calcular la ganancia de similitud que nos dan las hojas. Si la ganancia es suficientemente buena (límite definido por el modelador), mantenemos las hojas. Hacemos las divisiones maximizando la similitud.
 
-# Unimos receta y modelo en un Workflow
-wf <- workflow() %>%
-  add_recipe(receta) %>%
-  add_model(rf_spec)
+La ganancia es la suma de la similitud de las hojas menos la similitud de la raiz. La similitud de un nodo la medimos como la suma de los residuos en ese nodo (si has residuos positivos y negativos se cancelan), elevado al cuadrado y dividido por la cantidad de residuos más $\lambda$. $\lambda$ es el parametro de regularización. Si $\lambda$ es $0$, los nodos con pocos residuos van a tener similitudes muy altas respecto al resto. Aumentar $\lambda$ disminuye esta ventaja.
 
-# -------------------------------------------------------------------------
-# 5. Evaluación con Cross Validation (Ajustando hiperparámetros)
-# -------------------------------------------------------------------------
-# Definimos la grilla de parámetros para el tuning
-rf_grid <- grid_regular(
-  mtry(range = c(2, 10)),
-  min_n(range = c(2, 5)),
-  levels = 3
+```{r XGBoost, echo=FALSE, results="hide"}
+library(xgboost)
+
+xgb_spec <-
+    boost_tree(
+        tree_depth = tune(),
+        trees = tune()
+    ) %>%
+    set_engine("xgboost", importance = TRUE) %>%
+    set_mode("regression")
+ 
+xgb_grid <-
+    grid_regular(
+        tree_depth(range = c(2, 3)),
+        trees(range = c(50, 100)),
+        levels = 3
+    )
+ 
+# Reutiliza folds_preparados (misma receta, no hace falta recalcular
+# las features de credits ni el prep/bake)
+cv_results <- tune_grid_manual(
+    model_spec       = xgb_spec,
+    grid             = xgb_grid,
+    folds_preparados = folds_preparados,
+    metricas         = metric_set(rmse, mae, rsq)
 )
-
-# Ejecutamos CV en la grilla de parámetros
-cv_results <- tune_grid(
-  wf,
-  resamples = cv_folds,
-  grid = rf_grid,
-  metrics = metric_set(rmse, mae, rsq)
-)
-
-# -------------------------------------------------------------------------
-# 6. Resultados y Modelo Final
-# -------------------------------------------------------------------------
-# Ver las mejores métricas del Cross Validation
-collect_metrics(cv_results)
-
-# Seleccionar los mejores hiperparámetros basándonos en RMSE
-best_params <- select_best(cv_results, metric = "rmse")
-
-# Finalizar el workflow con los mejores parámetros y entrenar en el test set
-final_wf <- finalize_workflow(wf, best_params)
-final_fit <- last_fit(final_wf, split)
-
-# Métricas finales en el conjunto de prueba (Test set independiente)
-collect_metrics(final_fit)
-```
-
-```{r random_forest, echo=FALSE, results="hide"}
-library(randomForest)
-set.seed(1)
-
-# hay varios que son strings...
-model <- randomForest(imdb_score ~ release_year + runtime ,
-                      ntree = 500, # trees to build
-                      mtry = 4 #predictor vars to consider at each node
-                      ) # faltan mil cosas
-
-model
-
-#find number of trees that produce lowest test MSE
-which.min(model$mse)
-
-#find RMSE of best model
-sqrt(model$mse[which.min(model$mse)]) 
-
-plot(model) # nos da el MSE dado la cant de trees
-
-#produce variable importance plot
-varImpPlot(model) 
-
-
-model_tuned <- tuneRF(
-               x=c(titles$release_year, titles$runtime), #define predictor variables
-               y=titles$imdb_score, #define response variable
-               ntreeTry=500, 
-               mtryStart=4,  
-               stepFactor=1.5, #The factor to increase by until the out-of-bag estimated error stops improving by a certain amount.
-               improve=0.01, #The amount that the out-of-bag error needs to improve by to keep increasing the step factor.
-               trace=FALSE #don't show real-time progress
-               )
-
-
-predict(model, newdata=new)
-
-
-# questions: how to cross validate
-# how to consider string vars
-```
-
-
-
-XGBoost (Flor)
-
-```{r xgBoost, echo=FALSE, results="hide"}
-
-# implementar modelo (?) por ahí toca definir cosas con STAN.
+ 
+print(cv_results)
+ 
+# Mejores hiperparámetros según RMSE (equivalente a select_best())
+best_params <-
+    cv_results %>%
+    filter(.metric == "rmse") %>%
+    arrange(mean) %>%
+    slice(1)
+ 
+print(best_params)
+ 
+# Modelo final con los mejores hiperparámetros, ajustado en TODOS los folds
+# (o, si querés el modelo de producción, ver nota más abajo para
+# entrenarlo con todo `titles`)
+xgb_spec_final <-
+    boost_tree(
+        tree_depth = best_params$tree_depth,
+        trees = best_params$trees
+    ) %>%
+    set_engine("xgboost", importance = TRUE) %>%
+    set_mode("regression")
+ 
+cv_xgb_final <- evaluar_modelo_cv(xgb_spec_final, folds_preparados, metric_set(rmse, mae, rsq))
+print(cv_xgb_final$resumen)
 
 ```
 
