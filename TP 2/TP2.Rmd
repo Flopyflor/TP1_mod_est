@@ -430,6 +430,7 @@ Ideas de modelos (en teoria todos se pueden hacer en R)
 Primero que nada, decidimos preparar los datos para ser usados. En el dataset original tenemos las columnas `production_countries` y `genres`, que contienen arrays con los valores que aplican a la película. Esto es difícil de trabajar, y se pierde la noción de que una película hecha en `['GB']` está relacionada con una hecha en `['GB', 'FR']`. Luego, cambiamos el dataset para que tenga una columna por categoría, y la variable es binaria según si aplica o no. Para las películas en las que no se sabía, se marcó la columna `Unknown`, y si la película pertenecía a un género o país poco popular (con menos de 30 apariciones en el dataset), se lo consideró como 'Otro'.
 
 ```{r preprocesameinto_dummies, include=FALSE}
+
 #===========================================================
 # 1. Función para crear variables binarias (igual que antes)
 #===========================================================
@@ -580,7 +581,6 @@ n_directores_pelicula <-
     credits_directores %>%
     distinct(id, person_id) %>%
     count(id, name = "n_directores")
-
  
 titles <- titles %>%
     left_join(n_actores_pelicula, by = "id") %>%
@@ -593,8 +593,6 @@ titles <- titles %>%
 # ---- actor_popular / director_popular ----
 # Definidos como: la cantidad de películas del elenco/dirección más "prolífico"
 # de esa película (podés cambiar max() por sum() o mean() si preferís otra definición)
-
-
 
 # Top 10% de actores más prolíficos
 top10_actores <-
@@ -670,11 +668,6 @@ pop_directores <-
 #       n_pelis_director = 1) -> elegimos uno al azar entre
 #       los empatados
 #===========================================================
-
-También queríamos tener alguna medida de actores (y directores) "buenos", y usar esa información en nuestras predicciones. En este caso, decidimos calcular para cada persona su `Score` promedio, sacado de las películas en las que participó, y luego para cada película el promedio de los `Scores` de sus actores y directores, y el `Score` máximo. Como esta información depende de nuestra variable a calcular, no podemos usar el total de la información de nuestro dataset y después usar cross validation, porque estaríamos usando la respuesta para predecir la respuesta. Por eso, estas variables las vamos a calcular para cada fold.
-
-```{r preprocesamiento_credits_scores}
-```
  
 set.seed(123)
  
@@ -704,7 +697,12 @@ titles <- titles %>%
  
 VARS_NO_PREDICTORAS <- c("director_principal")
 
+```
 
+También queríamos tener alguna medida de actores (y directores) "buenos", y usar esa información en nuestras predicciones. En este caso, decidimos calcular para cada persona su `Score` promedio, sacado de las películas en las que participó, y luego para cada película el promedio de los `Scores` de sus actores y directores, y el `Score` máximo. Como esta información depende de nuestra variable a calcular, no podemos usar el total de la información de nuestro dataset y después usar cross validation, porque estaríamos usando la respuesta para predecir la respuesta. Por eso, estas variables las vamos a calcular para cada fold.
+
+```{r preprocesamiento_credits_scores}
+ 
 #===========================================================
 # 5. Placeholders para las features que SÍ usan imdb_score
 #    (se llenan de verdad más abajo, fold por fold; acá solo
@@ -726,6 +724,7 @@ Por último, para trabajar con los campos de texto de nuestro dataset, en este c
 
 
 ```{r receta, echo=FALSE, results='hide'}
+
 #===========================================================
 # 6. Receta base
 #===========================================================
@@ -811,6 +810,7 @@ cv_folds <- vfold_cv(titles, v = 5)
 
 
 ```{r preprocesamiento_sin_fuga}
+
 #===========================================================
 # 7. Funciones para calcular las features de actor/director
 #    SIN fuga.
@@ -936,6 +936,7 @@ aplicar_features_credits <- function(data_target,
 ```
 
 ```{r preprocesamiento_calc_folds, results='hide', echo=FALSE}
+
 #===========================================================
 # 8. Preparar los folds UNA SOLA VEZ
 #    (features de credits + prep/bake de la receta por fold).
@@ -1075,6 +1076,7 @@ evaluar_modelo_cv <- function(model_spec,
 ```
 
 ```{r tune_hiperparametros, results='hide', echo=FALSE}
+
 #===========================================================
 # 10. Tuning de hiperparámetros (equivalente a tune_grid())
 #     sobre folds ya preparados. Para cada fila de la grilla,
@@ -1109,7 +1111,6 @@ tune_grid_manual <- function(model_spec,
         }
     )
 }
-
 
 
 # Preparamos los folds UNA VEZ (se puede reutilizar para todos los modelos
@@ -1151,7 +1152,6 @@ print(metricas_lm)
 mse_lm <- cv_lm$mse
 
 print(mse_lm)
-
 
 ```
 
@@ -1347,7 +1347,6 @@ rf_spec_final <-
  
 cv_rf_final <- evaluar_modelo_cv(rf_spec_final, folds_preparados, metric_set(rmse, mae, rsq))
 print(cv_rf_final$resumen)
-
 ```
 
 
