@@ -374,19 +374,124 @@ Luego, vamos a medir la asociacion entre las variables, realizando una regresió
 
 Por otro lado, al hacer una regrasión entre `Comedia` y `Score`, podemos calcular la asociacion entre las variables.
  
-El coeficiente asociado a `Comedia` en el modelo más simple nos dio $-0.20632$, mientras que en el modelo con más variables dio $-0.1911522$. Esto implica que el que una película sea de comedia generalmente causa que tenga peor `Score`, pero no tanto como uno podría asumir si no considerara otras variables.
+El coeficiente asociado a `Comedia` en el modelo más simple nos dio $-0.20632$, mientras que en el modelo con más variables dio $-0.2352186 $. Esto implica que el que una película sea de comedia generalmente causa que tenga peor `Score`. Otras variables afectan esta probabilidad, pero no demasiado.
 
 ```{r calculo_con_regresion, echo=FALSE, results="hide"}
-titles$comedia = grepl('comedy', titles$genres) + 0
+# también está definida más abajo, pero tenerla dos veces no lastima a nadie
+crear_dummies_lista <- function(data,
+                                columna,
+                                prefijo,
+                                min_frecuencia,
+                                es_lista = TRUE){
 
-modelo_ajustado = lm(data = titles, imdb_score ~ comedia + production_countries + runtime + release_year)
-modelo_crudo = lm(data = titles, imdb_score ~ comedia)
+    columna <- rlang::ensym(columna)
+
+    #---------------------------------------------------
+    # Función auxiliar para procesar la columna
+    #---------------------------------------------------
+
+    procesar_columna <- function(x){
+
+        x <- replace_na(x, "")
+
+        if(es_lista){
+            x <- str_remove_all(x, "\\[|\\]|'")
+        }
+
+        x <- if_else(str_trim(x) == "", "Unknown", x)
+
+        str_split(x, ",")
+    }
+
+    #---------------------------------------------------
+    # Categorías frecuentes
+    #---------------------------------------------------
+
+    categorias <-
+        data %>%
+        select(id, !!columna) %>%
+        mutate(
+            valor = procesar_columna(!!columna)
+        ) %>%
+        unnest(valor) %>%
+        mutate(valor = str_trim(valor)) %>%
+        count(valor) %>%
+        filter(n >= min_frecuencia) %>%
+        pull(valor)
+
+    #---------------------------------------------------
+    # Expandir categorías
+    #---------------------------------------------------
+
+    data_long <-
+        data %>%
+        select(id, !!columna) %>%
+        mutate(
+            valor = procesar_columna(!!columna)
+        ) %>%
+        unnest(valor) %>%
+        mutate(valor = str_trim(valor)) %>%
+        mutate(
+            valor = if_else(
+                valor %in% categorias,
+                valor,
+                "Other"
+            )
+        )
+
+    #---------------------------------------------------
+    # Crear variables dummy
+    #---------------------------------------------------
+
+   dummies <-
+      data_long %>%
+      distinct(id, valor) %>%
+      mutate(value = 1) %>%
+      pivot_wider(
+          names_from = valor,
+          values_from = value,
+          values_fill = 0,
+          names_prefix = paste0(prefijo, "_")
+      )
+
+    #---------------------------------------------------
+    # Unir al dataset original
+    #---------------------------------------------------
+
+    data %>%
+        select(-!!columna) %>%
+        left_join(dummies, by = "id") %>%
+        mutate(
+            across(
+                starts_with(prefijo),
+                ~ replace_na(.x, 0)
+            )
+        )
+}
+
+titles_reduccion = titles
+
+titles_reduccion$comedia = grepl('comedy', titles$genres) + 0
+
+titles_reduccion <- titles_reduccion %>% dplyr::select(id, production_countries, comedia, runtime, release_year, imdb_score)
+
+titles_reduccion <-
+    crear_dummies_lista(
+        titles_reduccion,
+        production_countries,
+        "country",
+        min_frecuencia = 30,
+        es_lista = FALSE
+    )
+
+titles_reduccion <- titles_reduccion %>% dplyr::select(-id)
+
+modelo_ajustado = lm(data = titles_reduccion, imdb_score ~ .)
+modelo_crudo = lm(data = titles_reduccion, imdb_score ~ comedia)
 
 summary(modelo_ajustado)
 
-modelo_ajustado$coefficients['comedia']
-#estimate     error     tval
-# -0.1911522  0.0396124  -4.826
+modelo_ajustado$coefficients['comedia'] # -0.2352186 
 
 summary(modelo_crudo)
 modelo_crudo$coefficients['comedia']
@@ -401,18 +506,7 @@ cuadrático medio (MSE) de cada uno. Entre los modelos candidatos deben incluir 
 sí al menos un modelo de efectos mixtos y una regresión con splines. Elegir el modelo
 que minimice el MSE de predicción para el rating de IMDB.
 
-Cinco modelos: lineal, efectos mixtos, regresión con splines, Random Forest, XGBoost
 
-Ideas de modelos (en teoria todos se pueden hacer en R)
-
--- Regresión lineal
--- GAM (es una extensión de la regresión con splines y suele funcionar mejor.)
--- Efectos mixtos
-- Elastic Net (regresión lineal que usa Ridge y Lasso,)
--- Random Forest (arma muchos árboles de decisión sobre distintas muestras aleatorias de los datos y combina sus predicciones)
--- XGBoost (gradient boosting - construye árboles de decisión de manera secuencial, donde cada árbol intenta corregir los errores del anterior)
-- BART (modelo bayesiano que representa la respuesta como la suma de muchos árboles de decisión pequeños, permitiendo modelar relaciones complejas mientras cuantifica la incertidumbre de las predicciones)
-- AutoML (técnica que automatiza el proceso de selección del mejor modelo y de sus hiperparámetros, probando distintos algoritmos y configuraciones)
 
 <!--
 
@@ -425,6 +519,10 @@ Ideas de modelos (en teoria todos se pueden hacer en R)
 -->
 
 #### Preprocesamiento
+
+Vamos a hacer 5 modelos: regresión lineal, efectos mixtos, regresión con splines, Random Forest y XGBoost. Vamos a medir su efectividad con cross validation de 5 capas.
+
+Consideramos que tenemos variables numéricas (runtime, release_year, seasons, imdb_votes), categóricas (type, age_certification, genres, production_countries) y de texto (title, description). Además, tenemos el dataset de créditos de las películas. Para poder aprovechar esta información en nuestros modelos, vamos a tener que procesar los datos.
 
 Primero que nada, decidimos preparar los datos para ser usados. En el dataset original tenemos las columnas `production_countries` y `genres`, que contienen arrays con los valores que aplican a la película. Esto es difícil de trabajar, y se pierde la noción de que una película hecha en `['GB']` está relacionada con una hecha en `['GB', 'FR']`. Luego, cambiamos el dataset para que tenga una columna por categoría, y la variable es binaria según si aplica o no. Para las películas en las que no se sabía, se marcó la columna `Unknown`, y si la película pertenecía a un género o país poco popular (con menos de 30 apariciones en el dataset), se lo consideró como 'Otro'.
 
@@ -1149,9 +1247,13 @@ print(edf_por_fold)
 
 #### Random Forest
 
-El modelo Random Forest funciona de la siguiente forma. Primero se toma la muestra original. Digamos que vamos a hacer $t$ árboles. Entonces, hacemos $t$ versiones Bootstrap de la muestra, es decir, si la muestra tiene $n$ observaciones, tomamos $n$ observaciones con reposición. Luego, para cada muestra bootstrapeada construimos un árbol. Para contruirlo, en cada paso vamos a tomar un subconjunto de tamaño $m$ de las $p$ variables que componen la observación, y vamos a generar el nodo que mejor divide la muestra en función de esas variables, tomando distintas variables en cada paso del árbol hasta completarlo. Finalmente tenemos $t$ árboles distintos.
+El modelo Random Forest es un modelo que aprovecha la robustez del árbol de decisión, y le agrega varianza. Funciona de la siguiente forma. Primero se toma la muestra original. Digamos que vamos a hacer $t$ árboles. Entonces, hacemos $t$ versiones Bootstrap de la muestra, es decir, si la muestra tiene $n$ observaciones, tomamos $n$ observaciones con reposición. Luego, para cada muestra bootstrapeada construimos un árbol. Para contruirlo, en cada paso vamos a tomar un subconjunto de tamaño $m$ de las $p$ variables que componen la observación, y vamos a generar el nodo que mejor divide la muestra en función de esas variables, tomando distintas variables en cada paso del árbol hasta completarlo. Finalmente tenemos $t$ árboles distintos.
 
-Para predecir un nuevo valor, cada árbol hace su predicción, y luego se promedia el resultado (o, si es categórica, se elige la categoría con más votos).
+Para predecir un nuevo valor, cada árbol hace su predicción, y luego se promedia el resultado (o, si fuera categórica, se elige la categoría con más votos).
+
+Para nuestro modelo, decidimos hacer 500 árboles, pero la cantidad $m$ de variables por paso y $min_n$, la minima cantidad de residuos necesarios en un nodo para poder generarle hojas, los ajustamos automaticamente probando el modelo con varios hiperparámetros, y eligiendo el que mejor funcionara. Si $m$ es demasiado bajo, los árboles van a ser poco precisos, y no van a servir, pero si es demasiado grande, van a ser demasiado similares, y se pierde la ventaja del random forest. Por otro lado, si $min_n$ es demasiado bajo, corremos el riesgo de sobreajustar, mientras que si es muy alto, desajustamos. El modelo se prueba con cross validation. En este caso, nos dio que $mtry = 30$ y $min_n = 6$ son los mejores hiperparámetros dentro de los rangos $[5, 30]$ y $[2, 10]$. Es llamativo que `mtry` de tan alto, porque suele ser un tercio del total de las variables cuando la incógnita es continua, pero en este caso, muchas de nuestras variables son en realidad dummies de categóricas, así que son variables débiles, y por eso requiere tantas.
+
+El error absoluto y el cuadrático dieron relativamente bajos, y rsq dio 0.38, por lo que el modelo no es tan bueno explicando la varianza.
 
 ```{r random_forest, echo=FALSE, warning=FALSE, message=FALSE}
  
@@ -1161,13 +1263,18 @@ rf_spec <-
         mtry  = tune(),
         min_n = tune()
     ) %>%
-    set_engine("ranger", importance = "impurity") %>%
+    set_engine("ranger", 
+               importance = "impurity",
+               #max.depth = 30,
+               #sample.fraction = tune()
+               ) %>%
     set_mode("regression")
  
 rf_grid <-
     grid_regular(
-        mtry(range = c(2, 10)),
-        min_n(range = c(2, 5)),
+        mtry(range = c(5, 50)), # suele ser un tercio de la cantidad total de parámetros
+        #sample.fraction = sample_prop(range = c(0.6, 1)),
+        min_n(range = c(2, 10)),
         levels = 3
     )
  
@@ -1200,7 +1307,11 @@ rf_spec_final <-
         mtry  = best_params$mtry,
         min_n = best_params$min_n
     ) %>%
-    set_engine("ranger", importance = "impurity") %>%
+    set_engine("ranger", 
+               importance = "impurity", 
+               #max.depth = 30,
+               #sample.fraction = best_params$sample.fraction
+               ) %>%
     set_mode("regression")
  
 cv_rf_final <- evaluar_modelo_cv(rf_spec_final, folds_preparados, metric_set(rmse, mae, rsq))
@@ -1215,7 +1326,13 @@ XGBoost es otro modelo que usa Bosques, pero de una forma distinta al anterior. 
 
 Nuestros árboles no van a ser completos. Para decidir si un nodo amerita dividirse en dos hojas, vamos a calcular los índices de similitud de los nodos, y calcular la ganancia de similitud que nos dan las hojas. Si la ganancia es suficientemente buena (límite definido por el modelador), mantenemos las hojas. Hacemos las divisiones maximizando la similitud.
 
-La ganancia es la suma de la similitud de las hojas menos la similitud de la raiz. La similitud de un nodo la medimos como la suma de los residuos en ese nodo (si has residuos positivos y negativos se cancelan), elevado al cuadrado y dividido por la cantidad de residuos más $\lambda$. $\lambda$ es el parametro de regularización. Si $\lambda$ es $0$, los nodos con pocos residuos van a tener similitudes muy altas respecto al resto. Aumentar $\lambda$ disminuye esta ventaja.
+La similitud de un nodo la medimos como la suma de los residuos en ese nodo (si hay residuos positivos y negativos se cancelan), elevado al cuadrado y dividido por la cantidad de residuos más $\lambda$. La ganancia es la suma de la similitud de las hojas menos la similitud de la raiz.  $\lambda$ es el parametro de regularización. Si $\lambda$ es $0$, los nodos con pocos residuos van a tener similitudes muy altas respecto al resto. Aumentar $\lambda$ disminuye esta ventaja.
+
+Otra consideración importante es que la construcción de árboles es iterativa. La primera predicción es el promedio de los scores. El primer árbol contiene en sus nodos los residuos respecto a esa predicción. El segundo árbol contiene los residuos respecto a la predicción conjunta del promedio y el primer árbol. Así, cada árbol corrige sobre los anteriores. Para hacer esta aproximación al resultado correcto cada vez más gradual, se utiliza una tasa de aprendizaje. Así, una predicción es el promedio más la suma de los residuos de los árboles multiplicados por la tasa de aprendizaje, un número entre 0 y 1.
+
+En nuestro caso, primero entrenamos el modelo por cross validation para que elija los hiperparámetros tree_depth (profundidad máxima de los árboles), trees (cantidad de árboles), y learn_rate (tasa de aprendizaje). Dieron $2$,	$50$, y	$1.258925$. En general, la tasa de aprendizaje es inversamente proporcional a la cantidad de árboles, y tener árboles poco profundos es conveniente.
+
+El error absoluto y el cuadrático dieron relativamente bajos, y rsq dio 0.38, por lo que el modelo no es tan bueno explicando la varianza
 
 ```{r XGBoost, echo=FALSE, results="hide"}
 library(xgboost)
@@ -1223,15 +1340,17 @@ library(xgboost)
 xgb_spec <-
     boost_tree(
         tree_depth = tune(),
-        trees = tune()
+        trees = tune(),
+        learn_rate = tune()
     ) %>%
-    set_engine("xgboost", importance = TRUE) %>%
+    set_engine("xgboost") %>%
     set_mode("regression")
  
 xgb_grid <-
     grid_regular(
         tree_depth(range = c(2, 3)),
         trees(range = c(50, 100)),
+        learn_rate(range = c(0.1, 0.5)),
         levels = 3
     )
  
@@ -1263,7 +1382,7 @@ xgb_spec_final <-
         tree_depth = best_params$tree_depth,
         trees = best_params$trees
     ) %>%
-    set_engine("xgboost", importance = TRUE) %>%
+    set_engine("xgboost") %>%
     set_mode("regression")
  
 cv_xgb_final <- evaluar_modelo_cv(xgb_spec_final, folds_preparados, metric_set(rmse, mae, rsq))
