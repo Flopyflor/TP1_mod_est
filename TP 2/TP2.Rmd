@@ -73,7 +73,7 @@ El conjunto de datos contiene **3631 títulos** y **12 variables**, entre las qu
 
 No se observan valores faltantes en la mayoría de las variables. Sin embargo, la variable **seasons** presenta una gran cantidad de valores ausentes, lo cual es esperable ya que únicamente aplica a series y no a películas. La variable **imdb_votes** posee únicamente 13 valores faltantes.
 
-## Distribución del puntaje de IMDb
+### Distribución del puntaje de IMDb
 
 Antes de estudiar la relación entre las covariables y el puntaje de IMDb, resulta útil analizar la distribución de la variable respuesta. Para ello se construye un histograma del puntaje de IMDb.
 
@@ -83,7 +83,10 @@ ggplot(titles, aes(imdb_score)) +
     geom_histogram(bins = 30,
                    fill = "steelblue",
                    color = "white") +
-    labs(title="Distribución de IMDb Score")
+    labs(
+      x="imdb_score",
+      y="Frecuencia"
+    )
 
 ```
 
@@ -91,7 +94,7 @@ La distribución presenta una forma aproximadamente unimodal, concentrándose la
 
 Esto indica que la mayoría de los contenidos poseen una valoración intermedia-alta, mientras que los títulos muy malos o excelentes representan una proporción reducida del conjunto de datos.
 
-## Relación entre el género y el puntaje de IMDb
+### Relación entre el género y el puntaje de IMDb
 
 La variable **genres** se encuentra almacenada como una lista codificada en formato texto, por lo que primero es necesario transformarla para obtener un registro por cada género asociado a un título. De esta forma será posible calcular estadísticas descriptivas para cada género individualmente.
 
@@ -147,14 +150,18 @@ genres_long %>%
     ggplot(aes(fct_reorder(genres, imdb_score, median),
                imdb_score)) +
     geom_boxplot() +
-    coord_flip()
+    coord_flip() +
+    labs(
+        x="Género",
+        y="imdb_score"
+    )
 ```
 
 Se observa que los géneros **War**, **History** y **Documentation** presentan, en promedio, los puntajes más elevados, mientras que **Horror** y **Family** aparecen entre los de menor promedio.
 
 Sin embargo, los diagramas de caja muestran un importante solapamiento entre las distribuciones de los distintos géneros, lo que indica que el género por sí solo no determina completamente la calificación de un título. Aun así, existen diferencias sistemáticas que sugieren que esta variable podría aportar información útil para la predicción del puntaje.
 
-## Actores asociados con mejores y peores puntajes
+### Actores asociados con mejores y peores puntajes
 
 Para estudiar la influencia del elenco, se unen los datos de actores con los puntajes de IMDb mediante el identificador del título. Luego se calcula el puntaje promedio obtenido por cada actor.
 
@@ -197,7 +204,12 @@ actor_summary %>%
     ggplot(aes(fct_reorder(name, promedio),
                promedio)) +
     geom_col(fill="forestgreen") +
-    coord_flip()
+    coord_flip() +
+    labs(
+        title = "Top Mejores Actores",
+        x="Actor",
+        y="IMDb promedio"
+    )
 
 # Top peores actores
 
@@ -206,7 +218,12 @@ actor_summary %>%
     ggplot(aes(fct_reorder(name, promedio),
                promedio)) +
     geom_col(fill="firebrick") +
-    coord_flip()
+    coord_flip() +
+    labs(
+        title = "Top Peores Actores",
+        x="Actor",
+        y="IMDb promedio"
+    )
 
 ```
 
@@ -215,7 +232,7 @@ Los gráficos muestran los actores con mayor y menor puntaje promedio. Debe dest
 No obstante, este análisis permite identificar que la participación de determinados actores podría aportar información relevante para estimar el puntaje de IMDb.
 
 
-## Directores asociados con mejores y peores puntajes
+### Directores asociados con mejores y peores puntajes
 
 Se realiza un procedimiento análogo para los directores, calculando el puntaje promedio de las producciones dirigidas por cada uno de ellos. En este caso se consideran únicamente aquellos directores con al menos tres títulos en el conjunto de datos.
 
@@ -249,16 +266,26 @@ director_summary %>%
     ggplot(aes(fct_reorder(name,promedio),
                promedio))+
     geom_col(fill="steelblue")+
-    coord_flip()
+    coord_flip() +
+    labs(
+        title = "Top Mejores Directores",
+        x="Director",
+        y="IMDb promedio"
+    )
 
-# Top peores actores
 
 director_summary %>%
     slice_min(promedio,n=15) %>%
     ggplot(aes(fct_reorder(name,promedio),
                promedio))+
     geom_col(fill="lightgreen")+
-    coord_flip()
+    coord_flip() +
+    labs(
+        title = "Top Peores Directores",
+        x="Director",
+        y="IMDb promedio"
+    )
+
 
 ```
 Se observan diferencias importantes entre los promedios de los distintos directores. Algunos presentan promedios superiores a 8 puntos, mientras que otros se encuentran por debajo de 5.
@@ -266,7 +293,7 @@ Se observan diferencias importantes entre los promedios de los distintos directo
 Al igual que en el caso de los actores, estos resultados deben interpretarse con cautela, ya que el promedio depende tanto de la calidad de las producciones como de la cantidad de títulos considerados. Sin embargo, la identidad del director parece contener información útil para explicar el puntaje obtenido por una producción.
 
 
-## Palabras de la descripción asociadas al puntaje
+### Palabras de la descripción asociadas al puntaje
 
 Para responder el inciso (c), se analiza el texto de la descripción de cada título utilizando técnicas básicas de procesamiento de lenguaje natural. En primer lugar, las descripciones se dividen en palabras individuales (*tokenización*) y posteriormente se eliminan las palabras vacías (*stop words*), ya que suelen aportar poca información semántica.
 
@@ -301,26 +328,37 @@ word_summary %>%
     ggplot(aes(fct_reorder(word,promedio),
                promedio))+
     geom_col(fill="darkgreen")+
-    coord_flip()
+    coord_flip() +
+    labs(
+        title = "Top Mejores Palabras Descripción",
+        x="Palabras Descripción",
+        y="IMDb promedio"
+    )
 
 word_summary %>%
     slice_min(promedio, n=20) %>%
     ggplot(aes(fct_reorder(word,promedio),
                promedio))+
     geom_col(fill="red")+
-    coord_flip()
+    coord_flip() +
+    labs(
+        title = "Top Peores Palabras Descripción",
+        x="Palabras Descripción",
+        y="IMDb promedio"
+    )
+
 ```
 Se identifican palabras cuya presencia se asocia con puntajes promedio más altos y otras con puntajes inferiores. Sin embargo, estas asociaciones no deben interpretarse como relaciones causales, sino como indicadores de tendencias presentes en el conjunto de datos.
 
 Este análisis sugiere que el contenido textual de las descripciones contiene información predictiva que podría ser aprovechada posteriormente mediante técnicas de representación de texto.
 
 
-## Palabras del título asociadas al puntaje
+### Palabras del título asociadas al puntaje
 
 De manera similar al análisis anterior, se estudian las palabras presentes en el nombre de cada título. Luego de tokenizar los títulos y eliminar las palabras vacías, se calcula el puntaje promedio asociado a cada palabra, considerando únicamente aquellas que aparecen al menos diez veces.
 
 
-```{r palabras_titulo_puntaje, echo=FALSE, results='hide'}
+```{r palabras_titulo_puntaje, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
 
 # Palabras del título
 
@@ -351,30 +389,45 @@ title_summary <-
 title_summary %>%
   slice_max(promedio, n = 20) %>%
   ggplot(aes(fct_reorder(word, promedio), promedio)) +
-  geom_col(fill = "darkgreen") +
-  coord_flip()
+  geom_col(fill = "darkolivegreen") +
+  coord_flip() +
+    labs(
+        title = "Top Mejores Palabras Título",
+        x="Palabras Título",
+        y="IMDb promedio"
+    )
 
 title_summary %>%
   slice_min(promedio, n = 20) %>%
   ggplot(aes(fct_reorder(word, promedio), promedio)) +
-  geom_col(fill = "red") +
-  coord_flip()
+  geom_col(fill = "deeppink4") +
+  coord_flip() +
+    labs(
+        title = "Top Peores Palabras Título",
+        x="Palabras Título",
+        y="IMDb promedio"
+    )
 
 ```
 El análisis muestra que ciertas palabras aparecen con mayor frecuencia en títulos con puntajes elevados, mientras que otras se asocian con producciones de menor valoración promedio.
 
 Si bien estas diferencias pueden deberse parcialmente al tipo de contenido o al género de las producciones, los resultados indican que el título también contiene información potencialmente útil para construir modelos predictivos.
 
-2. Causalidad.
+## Causalidad.
 
+En este ejercicio buscamos estimar el efecto causal directo de que un título pertenezca al género comedia sobre su puntaje de IMDb. La palabra `directo` es importante, ya que no nos interesa el efecto que pueda producirse de manera indirecta a través de otras variables. Para ello utilizamos el siguiente DAG, que representa las relaciones causales asumidas entre las variables y permite identificar qué variables deben condicionarse para bloquear caminos espurios y aislar el efecto de interés.
 
-El efecto de `Comedia` sobre `Score` está mediado por `Duración`, que crea un camino como cadena. Además, está afectado por `País`, que crea un camino como confounder. Al condicionar por `Duración`, que es collider entre `Año` y `Comedia`, se abre el camino `Comedia` -> `Duración` <- `Año` -> `Score`, por lo que hay que también condicionar por `Año`. Entonces, la forma más clara de medir el efecto causal directo de `Comedia` sobre `Score` es condicionando por `Duración`, `País` y `Año`. Dado que todas estas variables son necesarias, y no hay otras en el DAG, este es el único conjunto por el que podemos condicionar para medir el efecto.
+```{r dag, echo=FALSE, fig.cap="DAG Causalidad", out.width="70%", fig.align="center"}
+knitr::include_graphics("dag.png")
+```
 
-Luego, vamos a medir la asociacion entre las variables, realizando una regresión lineal. Primero hacemo una regresión en la que ponemos a `Score` en función de las variables `Comedia`, `País`, `Año` y `Duración`. Al condicionar por este conjunto (además de `Comedia`), logro independencia entre el Score si fuera `Comedia` y la variable `Comedia`. Esto nos permite decir que el índice de asociacion es igual al efecto causal promedio.
+El efecto de `Comedia` sobre `Score` está mediado por `Duración`, que crea un camino como cadena. Además, está afectado por `País`, que crea un camino como confounder. Al condicionar por `Duración`, que es collider entre `Año` y `Comedia`, se abre el camino `Comedia` $\rightarrow$ `Duración` $\leftarrow$ `Año` $\rightarrow$ `Score`, por lo que hay que también condicionar por `Año`. Entonces, la forma más clara de medir el efecto causal directo de `Comedia` sobre `Score` es condicionando por `Duración`, `País` y `Año`. Dado que todas estas variables son necesarias, y no hay otras en el DAG, este es el único conjunto por el que podemos condicionar para medir el efecto.
 
-Por otro lado, al hacer una regrasión entre `Comedia` y `Score`, podemos calcular la asociacion entre las variables.
+Luego estimamos este efecto mediante una regresión lineal. En primer lugar ajustamos un modelo donde `Score` depende de `Comedia`, `País`, `Año` y `Duración`. De acuerdo con el DAG, al condicionar por estas variables se bloquean todos los caminos no causales entre `Comedia` y `Score`, así como el camino mediado por `Duración`. Bajo estas hipótesis, el coeficiente asociado a `Comedia` puede interpretarse como una estimación del efecto causal directo promedio.
+
+Por otro lado, estimamos la asociación cruda ajustando una regresión donde `Score` depende únicamente de `Comedia`. En este caso, el coeficiente refleja únicamente la asociación entre ambas variables, sin controlar por posibles variables de confusión ni por el efecto mediado por la duración.
  
-El coeficiente asociado a `Comedia` en el modelo más simple nos dio $-0.20632$, mientras que en el modelo con más variables dio $-0.2352186 $. Esto implica que el que una película sea de comedia generalmente causa que tenga peor `Score`. Otras variables afectan esta probabilidad, pero no demasiado.
+El coeficiente asociado a `Comedia` en el modelo sin ajustar fue de $-0.20632$, mientras que el efecto causal directo estimado mediante el modelo ajustado fue de $-0.2352186$. Esto sugiere que, manteniendo constantes `País`, `Año` y `Duración`, pertenecer al género comedia disminuye en promedio el `Score` esperado en aproximadamente 0.24 puntos. La cercanía entre ambos coeficientes indica que el ajuste por estas variables modifica relativamente poco la estimación respecto de la asociación cruda.
 
 ```{r calculo_con_regresion, echo=FALSE, results="hide"}
 # también está definida más abajo, pero tenerla dos veces no lastima a nadie
@@ -499,16 +552,17 @@ modelo_crudo$coefficients['comedia']
 
 ```
 
-3. Selección de modelos.
+## Selección de modelos.
 
 
-#### Preprocesamiento
+#### Preprocesamiento:
+
 
 Vamos a hacer 5 modelos: regresión lineal, efectos mixtos, regresión con splines, Random Forest y XGBoost. Vamos a medir su efectividad con cross validation de 5 capas.
 
 Consideramos que tenemos variables numéricas (runtime, release_year, seasons, imdb_votes), categóricas (type, age_certification, genres, production_countries) y de texto (title, description). Además, tenemos el dataset de créditos de las películas. Para poder aprovechar esta información en nuestros modelos, vamos a tener que procesar los datos.
 
-Primero que nada, decidimos preparar los datos para ser usados. En el dataset original tenemos las columnas `production_countries` y `genres`, que contienen arrays con los valores que aplican a la película. Esto es difícil de trabajar, y se pierde la noción de que una película hecha en `['GB']` está relacionada con una hecha en `['GB', 'FR']`. Luego, cambiamos el dataset para que tenga una columna por categoría, y la variable es binaria según si aplica o no. Para las películas en las que no se sabía, se marcó la columna `Unknown`, y si la película pertenecía a un género o país poco popular (con menos de 30 apariciones en el dataset), se lo consideró como 'Otro'.
+Primero que nada, preparamos las variables categoricas de lista. En el dataset original tenemos las columnas `production_countries` y `genres`, que contienen arrays con los valores que aplican a la película. Esto es difícil de trabajar, y se pierde la noción de que una película hecha en `['GB']` está relacionada con una hecha en `['GB', 'FR']`. Luego, cambiamos el dataset para que tenga una columna por categoría, y la variable es binaria según si aplica o no. Para las películas en las que no se sabía, se marcó la columna `Unknown`, y si la película pertenecía a un género o país poco popular (con menos de 30 apariciones en el dataset), se lo consideró como 'Otro'.
 
 ```{r preprocesameinto_dummies, include=FALSE}
 
@@ -832,9 +886,10 @@ VARS_NO_PREDICTORAS <- c("director_principal")
 
 ```
 
-También queríamos tener alguna medida de actores (y directores) "buenos", y usar esa información en nuestras predicciones. En este caso, decidimos calcular para cada persona su `Score` promedio, sacado de las películas en las que participó, y luego para cada película el promedio de los `Scores` de sus actores y directores, y el `Score` máximo. Como esta información depende de nuestra variable a calcular, no podemos usar el total de la información de nuestro dataset y después usar cross validation, porque estaríamos usando la respuesta para predecir la respuesta. Por eso, estas variables las vamos a calcular para cada fold.
+También queríamos tener alguna medida de actores (y directores) "buenos", y usar esa información en nuestras predicciones. En este caso, decidimos calcular para cada persona su `Score` promedio, sacado de las películas en las que participó, y luego para cada película el promedio de los `Scores` de sus actores y directores, y el `Score` máximo. Como esta información depende de nuestra variable a calcular, no podemos usar el total de la información de nuestro dataset y después usar cross validation, porque estaríamos usando la respuesta para predecir la respuesta. Por eso, estas variables las vamos a calcular para cada fold. Además, incluso dentro del conjunto de entrenamiento de un fold, el promedio asociado a un actor o director no debe incluir la película que se está intentando predecir. Para resolver esto utilizamos una estrategia leave-one-out: al calcular el promedio de una película de entrenamiento, primero se excluye su propio imdb_score del promedio de sus actores y directores.
 
-```{r preprocesamiento_credits_scores}
+
+```{r preprocesamiento_credits_scores, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
  
 #===========================================================
 # 5. Placeholders para las features que SÍ usan imdb_score
@@ -956,7 +1011,6 @@ cv_folds_tuning <- vfold_cv(datos_tuning, v = 5)
 
 ```
 
-Como las variables basadas en el imdb_score utilizan la variable respuesta para construirse, es necesario recalcularlas dentro de cada fold de la validación cruzada para evitar fuga de información. Además, incluso dentro del conjunto de entrenamiento de un fold, el promedio asociado a un actor o director no debe incluir la película que se está intentando predecir. Para resolver esto utilizamos una estrategia leave-one-out: al calcular el promedio de una película de entrenamiento, primero se excluye su propio imdb_score del promedio de sus actores y directores.
 
 
 ```{r preprocesamiento_sin_fuga, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
@@ -1138,7 +1192,7 @@ preparar_folds_credits <- function(folds, receta, credits_actores, credits_direc
 
 ```
 
-Con los folds ya preparados implementamos una función general para evaluar modelos mediante validación cruzada. Esta función entrena el modelo en cada fold, obtiene las predicciones sobre el conjunto de evaluación y calcula las métricas de interés (RMSE, MSE y R^2). De esta forma todos los modelos son evaluados exactamente sobre las mismas particiones de los datos, haciendo que la comparación entre ellos sea justa.
+Con los folds ya preparados implementamos una función general para evaluar modelos mediante validación cruzada. Esta función entrena el modelo en cada fold, obtiene las predicciones sobre el conjunto de evaluación y calcula las métricas de interés (RMSE, MSE y $R^2$). De esta forma todos los modelos son evaluados exactamente sobre las mismas particiones de los datos, haciendo que la comparación entre ellos sea justa.
 
 ```{r cross_validate, results='hide', echo=FALSE}
  
@@ -1321,7 +1375,8 @@ folds_preparados_tuning <- preparar_folds_credits(
 ```
 
 
-#### Regresión lineal
+#### Regresión lineal:
+
 
 Como línea de base, ajustamos una regresión lineal múltiple utilizando todas las variables disponibles luego del preprocesamiento. Este modelo supone que el efecto de cada predictor sobre el imdb_score es lineal y aditivo, por lo que sirve como referencia para evaluar si modelos más complejos logran mejorar el desempeño predictivo.
 
@@ -1348,11 +1403,11 @@ print(metricas_lm)
 
 
 ```
-La validación cruzada arrojó un MSE promedio de 1.162, equivalente a un RMSE de 1.076, con un R^2 de 0.221. Esto indica que el modelo logra explicar aproximadamente un 22% de la variabilidad del puntaje de IMDB y comete, en promedio, un error cercano a 1.08 puntos sobre la escala de puntuación.
+La validación cruzada arrojó un MSE promedio de 1.162, equivalente a un RMSE de 1.076, con un $R^2$ de 0.221. Esto indica que el modelo logra explicar aproximadamente un 22% de la variabilidad del puntaje de IMDB y comete, en promedio, un error cercano a 1.08 puntos sobre la escala de puntuación.
  
-#### GAM
+#### GAM:
 
-A continuación ajustamos un Modelo Aditivo Generalizado (GAM). A diferencia de la regresión lineal, este modelo permite que algunas variables numéricas tengan una relación no lineal con el imdb_score mediante funciones suaves (splines), mientras que el resto de las variables (como las dummies y las variables obtenidas mediante TF-IDF) se incorporan de forma lineal. Esto permite capturar patrones más complejos sin perder interpretabilidad.
+A diferencia de la regresión lineal, este modelo permite que algunas variables numéricas tengan una relación no lineal con el imdb_score mediante funciones suaves (splines), mientras que el resto de las variables (como las dummies y las variables obtenidas mediante TF-IDF) se incorporan de forma lineal. Esto permite capturar patrones más complejos sin perder interpretabilidad.
 
 ```{r gam, results='hide', echo=FALSE, warning=FALSE, message=FALSE}
  
@@ -1407,7 +1462,7 @@ print(cv_gam$resumen)
 
 ```
 
-La validación cruzada obtuvo un MSE promedio de 1.105, un RMSE de 1.049 y un R^2 de 0.253. Comparado con la regresión lineal, el GAM redujo el error de predicción y aumentó la proporción de variabilidad explicada, lo que sugiere que existen relaciones no lineales entre algunas variables numéricas y el puntaje de IMDB que la regresión lineal no logra capturar.
+La validación cruzada obtuvo un MSE promedio de 1.105, un RMSE de 1.049 y un $R^2$ de 0.253. Comparado con la regresión lineal, el GAM redujo el error de predicción y aumentó la proporción de variabilidad explicada, lo que sugiere que existen relaciones no lineales entre algunas variables numéricas y el puntaje de IMDB que la regresión lineal no logra capturar.
 
 ```{r EDF, results='hide', echo=FALSE}
 #-------------------------------------------------------------
@@ -1429,9 +1484,9 @@ print(edf_por_fold)
 ```
 
 
-#### Modelo mixto
+#### Modelo Mixto:
 
-También evaluamos un modelo de efectos mixtos. En este caso se utilizaron todas las variables como efectos fijos y se agregó un intercepto aleatorio asociado al director principal de cada película. La idea es capturar posibles diferencias sistemáticas entre directores que no puedan explicarse únicamente mediante las demás variables incluidas en el modelo.
+En este caso se utilizaron todas las variables como efectos fijos y se agregó un intercepto aleatorio asociado al director principal de cada película. La idea es capturar posibles diferencias sistemáticas entre directores que no puedan explicarse únicamente mediante las demás variables incluidas en el modelo.
 
 ```{r modelo_mixto, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
 
@@ -1491,7 +1546,7 @@ print(cv_mixto$resumen)
 
 ```
 
-La validación cruzada produjo un MSE promedio de 1.162, un RMSE de 1.076 y un R^2 de 0.221. Estos resultados son prácticamente idénticos a los obtenidos con la regresión lineal, lo que indica que incorporar un intercepto aleatorio para el director principal no aporta una mejora apreciable en la capacidad predictiva del modelo.
+La validación cruzada produjo un MSE promedio de 1.162, un RMSE de 1.076 y un $R^2$ de 0.221. Estos resultados son prácticamente idénticos a los obtenidos con la regresión lineal, lo que indica que incorporar un intercepto aleatorio para el director principal no aporta una mejora apreciable en la capacidad predictiva del modelo.
 
 Una posible explicación es que la mayoría de los directores aparecen en muy pocas películas dentro del conjunto de datos, por lo que el modelo dispone de poca información para estimar con precisión un efecto aleatorio específico para cada uno.
 
@@ -1505,9 +1560,10 @@ summary(extract_fit_engine(cv_mixto$fits[["Fold1"]]))
 
 ```
 
-#### Random Forest
+#### Random Forest:
 
-El modelo Random Forest es un modelo que aprovecha la robustez del árbol de decisión, y le agrega varianza. Funciona de la siguiente forma. Primero se toma la muestra original. Digamos que vamos a hacer $t$ árboles. Entonces, hacemos $t$ versiones Bootstrap de la muestra, es decir, si la muestra tiene $n$ observaciones, tomamos $n$ observaciones con reposición. Luego, para cada muestra bootstrapeada construimos un árbol. Para contruirlo, en cada paso vamos a tomar un subconjunto de tamaño $m$ de las $p$ variables que componen la observación, y vamos a generar el nodo que mejor divide la muestra en función de esas variables, tomando distintas variables en cada paso del árbol hasta completarlo. Finalmente tenemos $t$ árboles distintos.
+
+Es un modelo que aprovecha la robustez del árbol de decisión, y le agrega varianza. Funciona de la siguiente forma. Primero se toma la muestra original. Digamos que vamos a hacer $t$ árboles. Entonces, hacemos $t$ versiones Bootstrap de la muestra, es decir, si la muestra tiene $n$ observaciones, tomamos $n$ observaciones con reposición. Luego, para cada muestra bootstrapeada construimos un árbol. Para contruirlo, en cada paso vamos a tomar un subconjunto de tamaño $m$ de las $p$ variables que componen la observación, y vamos a generar el nodo que mejor divide la muestra en función de esas variables, tomando distintas variables en cada paso del árbol hasta completarlo. Finalmente tenemos $t$ árboles distintos.
 
 Para predecir un nuevo valor, cada árbol hace su predicción, y luego se promedia el resultado (o, si fuera categórica, se elige la categoría con más votos).
 
@@ -1624,11 +1680,11 @@ print(cv_rf_final$resumen)
 
 ```
 
-Una vez seleccionados los hiperparámetros, el modelo se volvió a evaluar utilizando los mismos folds empleados para comparar todos los modelos anteriores. El Random Forest obtuvo un MSE promedio de 0.850, un RMSE de 0.920 y un R^2 de 0.393, mejorando de manera considerable a la regresión lineal, al modelo mixto y al GAM. Esto sugiere que existen relaciones complejas e interacciones entre las variables que los modelos lineales no logran capturar, mientras que el Random Forest puede modelarlas de manera flexible.
+Una vez seleccionados los hiperparámetros, el modelo se volvió a evaluar utilizando los mismos folds empleados para comparar todos los modelos anteriores. El Random Forest obtuvo un MSE promedio de 0.850, un RMSE de 0.920 y un $R^2$ de 0.393, mejorando de manera considerable a la regresión lineal, al modelo mixto y al GAM. Esto sugiere que existen relaciones complejas e interacciones entre las variables que los modelos lineales no logran capturar, mientras que el Random Forest puede modelarlas de manera flexible.
 
-#### XGBoost
+#### XGBoost:
 
-XGBoost es otro modelo basado en árboles de decisión, pero su estrategia es distinta a la del Random Forest. Mientras que en un Random Forest todos los árboles se construyen de manera independiente y luego se promedian sus predicciones, en XGBoost los árboles se generan de forma secuencial. El primer árbol parte de una predicción inicial, que en este caso es el promedio de los Scores, y cada árbol posterior intenta corregir los errores cometidos por los anteriores. De esta manera, el modelo va refinando progresivamente sus predicciones.
+Es otro modelo basado en árboles de decisión, pero su estrategia es distinta a la del Random Forest. Mientras que en un Random Forest todos los árboles se construyen de manera independiente y luego se promedian sus predicciones, en XGBoost los árboles se generan de forma secuencial. El primer árbol parte de una predicción inicial, que en este caso es el promedio de los Scores, y cada árbol posterior intenta corregir los errores cometidos por los anteriores. De esta manera, el modelo va refinando progresivamente sus predicciones.
 
 Nuestros árboles no van a ser completos. Para decidir si un nodo amerita dividirse en dos hojas, vamos a calcular los índices de similitud de los nodos, y calcular la ganancia de similitud que nos dan las hojas. Si la ganancia es suficientemente buena (límite definido por el modelador), mantenemos las hojas. Hacemos las divisiones maximizando la similitud.
 
@@ -1640,7 +1696,7 @@ Para evitar el sobreajuste, XGBoost incorpora distintos mecanismos de regulariza
 
 Los hiperparámetros se seleccionaron mediante validación cruzada utilizando el conjunto de datos reservado para tuning, de forma independiente al conjunto empleado para evaluar el desempeño final del modelo. Los mejores valores obtenidos fueron mtry = 104, trees = 996, tree_depth = 6, learn_rate = 0.026, loss_reduction = 2.67 y sample_size = 0.904. Estos valores indican que el modelo prefiere construir una gran cantidad de árboles relativamente poco profundos, realizando pequeñas correcciones en cada iteración mediante una tasa de aprendizaje baja, una estrategia característica de los métodos de gradient boosting.
 
-Finalmente, el modelo se evaluó utilizando los mismos folds empleados para el resto de los modelos, obteniendo un MSE promedio de 0.836, un RMSE de 0.913 y un R² de 0.396. Estos resultados fueron los mejores de todos los modelos evaluados, aunque la mejora respecto del Random Forest fue relativamente pequeña. Esto sugiere que la estrategia de boosting logra aprovechar ligeramente mejor la información disponible, convirtiendo a XGBoost en el modelo con mayor capacidad predictiva para estimar el IMDB Score en este conjunto de datos.
+Finalmente, el modelo se evaluó utilizando los mismos folds empleados para el resto de los modelos, obteniendo un MSE promedio de 0.836, un RMSE de 0.913 y un $R^2$ de 0.396. Estos resultados fueron los mejores de todos los modelos evaluados, aunque la mejora respecto del Random Forest fue relativamente pequeña. Esto sugiere que la estrategia de boosting logra aprovechar ligeramente mejor la información disponible, convirtiendo a XGBoost en el modelo con mayor capacidad predictiva para estimar el IMDB Score en este conjunto de datos.
 
 ```{r XGBoost, echo=FALSE, results="hide"}
 
