@@ -22,6 +22,8 @@ library(textrecipes)
 library(stopwords)
 library(readr)
 library(multilevelmod)   # engine "lmer" para linear_reg()
+library(ranger)
+library(xgboost)
 
 # result='hide' oculta tmb el resultado del chunk
 ```
@@ -217,7 +219,7 @@ No obstante, este análisis permite identificar que la participación de determi
 
 Se realiza un procedimiento análogo para los directores, calculando el puntaje promedio de las producciones dirigidas por cada uno de ellos. En este caso se consideran únicamente aquellos directores con al menos tres títulos en el conjunto de datos.
 
-```{r directores_puntaje, echo=FALSE, results="hide"}
+```{r directores_puntaje, echo=FALSE}
 
 # Directores
 
@@ -270,7 +272,7 @@ Para responder el inciso (c), se analiza el texto de la descripción de cada tí
 
 Finalmente, se calcula el puntaje promedio asociado a cada palabra, considerando únicamente aquellas que aparecen al menos 20 veces en el conjunto de datos.
 
-```{r palabras_puntaje, echo=FALSE, results="hide"}
+```{r palabras_puntaje, echo=FALSE}
 
 # (c) Palabras asociadas con el puntaje
 
@@ -318,7 +320,7 @@ Este análisis sugiere que el contenido textual de las descripciones contiene in
 De manera similar al análisis anterior, se estudian las palabras presentes en el nombre de cada título. Luego de tokenizar los títulos y eliminar las palabras vacías, se calcula el puntaje promedio asociado a cada palabra, considerando únicamente aquellas que aparecen al menos diez veces.
 
 
-```{r palabras_titulo_puntaje, echo=FALSE, results="hide"}
+```{r palabras_titulo_puntaje, echo=FALSE, results='hide'}
 
 # Palabras del título
 
@@ -338,6 +340,14 @@ title_summary <-
     filter(frecuencia>=10)
 
 
+```
+
+
+
+
+```{r palabras_titulo_puntaje_grafico, echo=FALSE}
+
+
 title_summary %>%
   slice_max(promedio, n = 20) %>%
   ggplot(aes(fct_reorder(word, promedio), promedio)) +
@@ -351,22 +361,11 @@ title_summary %>%
   coord_flip()
 
 ```
-
 El análisis muestra que ciertas palabras aparecen con mayor frecuencia en títulos con puntajes elevados, mientras que otras se asocian con producciones de menor valoración promedio.
 
 Si bien estas diferencias pueden deberse parcialmente al tipo de contenido o al género de las producciones, los resultados indican que el título también contiene información potencialmente útil para construir modelos predictivos.
 
-2. Causalidad. Se tiene el siguiente DAG: 
-
-[img]
-
-donde Comedia es una variable binaria que indica si el género del título incluye comedia. ¿A
-qué subconjunto de las variables Año, Duración y País se debe condicionar para estimar
-el efecto causal directo de Comedia sobre el Score —es decir, el efecto que no está
-mediado por la Duración—? Dar todas las posibilidades y justificar. Luego estimar ese
-efecto con una regresión sobre los datos (Comedia sale de genres, Duración de runtime,
-Año de release_year y País de production_countries) y compararlo con la asociación
-cruda de Comedia sobre Score (sin ajustar por nada).
+2. Causalidad.
 
 
 El efecto de `Comedia` sobre `Score` está mediado por `Duración`, que crea un camino como cadena. Además, está afectado por `País`, que crea un camino como confounder. Al condicionar por `Duración`, que es collider entre `Año` y `Comedia`, se abre el camino `Comedia` -> `Duración` <- `Año` -> `Score`, por lo que hay que también condicionar por `Año`. Entonces, la forma más clara de medir el efecto causal directo de `Comedia` sobre `Score` es condicionando por `Duración`, `País` y `Año`. Dado que todas estas variables son necesarias, y no hay otras en el DAG, este es el único conjunto por el que podemos condicionar para medir el efecto.
@@ -500,24 +499,8 @@ modelo_crudo$coefficients['comedia']
 
 ```
 
-3. Selección de modelos. Dividir el conjunto de datos en entrenamiento y testeo (tam
-bién pueden usar otra técnica, como validación cruzada). Con todas las variables dispo
-nibles, probar al menos 5 modelos diferentes y mostrar la estimación del error
-cuadrático medio (MSE) de cada uno. Entre los modelos candidatos deben incluir sí o
-sí al menos un modelo de efectos mixtos y una regresión con splines. Elegir el modelo
-que minimice el MSE de predicción para el rating de IMDB.
+3. Selección de modelos.
 
-
-
-<!--
-
-1. Variables numéricas: runtime, release_year, seasons, imdb_votes
-
-2. Variables categóricas: type, age_certification, genres, production_countries
-
-3. Variables de texto: title, description
-
--->
 
 #### Preprocesamiento
 
@@ -649,6 +632,58 @@ titles <-
         min_frecuencia = 30,
         es_lista = FALSE
     )
+
+
+#===========================================================
+# 3.b. Versión de crear_dummies_lista para datos NUEVOS
+#    (titles_test): reutiliza las categorías ya definidas por
+#    el training en vez de recalcularlas, para que las columnas
+#    generadas calcen exactamente con las del modelo entrenado.
+#===========================================================
+ 
+aplicar_dummies_lista <- function(data, columna, prefijo, categorias, es_lista = TRUE){
+ 
+    columna <- rlang::ensym(columna)
+ 
+    procesar_columna <- function(x){
+        x <- replace_na(x, "")
+        if (es_lista) x <- str_remove_all(x, "\\[|\\]|'")
+        x <- if_else(str_trim(x) == "", "Unknown", x)
+        str_split(x, ",")
+    }
+ 
+    data_long <-
+        data %>%
+        select(id, !!columna) %>%
+        mutate(valor = procesar_columna(!!columna)) %>%
+        unnest(valor) %>%
+        mutate(valor = str_trim(valor)) %>%
+        mutate(valor = if_else(valor %in% categorias, valor, "Other"))
+ 
+    dummies <-
+        data_long %>%
+        distinct(id, valor) %>%
+        mutate(value = 1) %>%
+        pivot_wider(
+            names_from    = valor,
+            values_from   = value,
+            values_fill   = 0,
+            names_prefix  = paste0(prefijo, "_")
+        )
+ 
+    # Si en este dataset nuevo no aparece NINGUNA fila de alguna categoría
+    # que sí existía en el training, hay que agregar esa columna en 0 a
+    # mano -- si no, bake()/predict() se rompe por columna faltante.
+    columnas_esperadas <- paste0(prefijo, "_", categorias)
+    faltantes          <- setdiff(columnas_esperadas, names(dummies))
+    for (col in faltantes) dummies[[col]] <- 0
+ 
+    data %>%
+        select(-!!columna) %>%
+        left_join(dummies, by = "id") %>%
+        mutate(across(starts_with(prefijo), ~ replace_na(.x, 0)))
+}
+
 
 ```
 
@@ -821,7 +856,7 @@ titles <- titles %>%
 Por último, para trabajar con los campos de texto de nuestro dataset, en este caso `title` y `descripción`, decidimos usar TF-IDF. El proceso es así: primero se separa el campo en palabras (tokeniza). Luego se extraen las palabras más comunes (como "in" o "the"), y se las lleva a su raíz (por ejemplo, los plurales se vuelven singulares). Luego nos quedamos con las palabras más comúnes, y les aplicamos el algoritmo TF-IDF. Este algorítmo calcula la frecuencia de una palabra en su propio texto, y la compara con su frecuencia en el total de los textos. De esta forma determina las palabras clave de un texto, y usa esto para sus predicciones.
 
 
-```{r receta, echo=FALSE, results='hide'}
+```{r receta, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
 
 #===========================================================
 # 6. Receta base
@@ -894,20 +929,37 @@ step_zv(
 )
 
 
-#----------------------------------------------------
-# Folds
-#----------------------------------------------------
+#===========================================================
+# 6.b. Split para separar tuning de reporte
+#
+#    datos_tuning:    SOLO se usa para elegir hiperparámetros
+#                      (tune_grid_manual). Nunca se reporta error acá.
+#    datos_principales: se usa para los folds "de siempre"
+#                      (evaluar_modelo_cv), con los que se entrena
+#                      y reporta el error de TODOS los modelos
+#                      (LM, GAM, mixto, RF final), para que la
+#                      comparación entre modelos sea consistente.
+#
+#    Al ser disjuntos, elegir mtry/min_n mirando datos_tuning no
+#    "contamina" el error que después reportás con datos_principales.
+#===========================================================
 
 set.seed(123)
 
-# Los mismos folds para TODOS los modelos
-cv_folds <- vfold_cv(titles, v = 5)
+split_inicial <- initial_split(titles, prop = 0.75)
+ 
+datos_principales <- training(split_inicial)   # 75% -> folds de reporte
+datos_tuning       <- testing(split_inicial)    # 25% -> solo para tunear
+ 
+cv_folds <- vfold_cv(datos_principales, v = 5)
+cv_folds_tuning <- vfold_cv(datos_tuning, v = 5)
 
 ```
 
+Como las variables basadas en el imdb_score utilizan la variable respuesta para construirse, es necesario recalcularlas dentro de cada fold de la validación cruzada para evitar fuga de información. Además, incluso dentro del conjunto de entrenamiento de un fold, el promedio asociado a un actor o director no debe incluir la película que se está intentando predecir. Para resolver esto utilizamos una estrategia leave-one-out: al calcular el promedio de una película de entrenamiento, primero se excluye su propio imdb_score del promedio de sus actores y directores.
 
 
-```{r preprocesamiento_sin_fuga}
+```{r preprocesamiento_sin_fuga, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
 
 #===========================================================
 # 7. Funciones para calcular las features de actor/director
@@ -941,7 +993,7 @@ calcular_stats_credits <- function(data_analysis, credits_actores, credits_direc
         group_by(person_id) %>%
         summarise(
             suma_actor = sum(imdb_score, na.rm = TRUE),
-            n_actor    = n(), # esto es cantidad de peliculas en la que estuvo
+            n_actor    = n(),
             .groups = "drop"
         )
  
@@ -952,7 +1004,7 @@ calcular_stats_credits <- function(data_analysis, credits_actores, credits_direc
         group_by(person_id) %>%
         summarise(
             suma_director = sum(imdb_score, na.rm = TRUE),
-            n_director    = n(),  # esto es cantidad de peliculas en la que estuvo
+            n_director    = n(),
             .groups = "drop"
         )
  
@@ -1033,6 +1085,9 @@ aplicar_features_credits <- function(data_target,
  
 ```
 
+Una vez definidas las funciones para construir las variables derivadas de actores y directores, preparamos los folds de la validación cruzada. En cada fold se calculan estas variables utilizando únicamente la información disponible en el conjunto de entrenamiento, y luego se aplica la misma receta de preprocesamiento tanto al conjunto de entrenamiento como al de evaluación. Como este procedimiento es independiente del modelo que se vaya a ajustar, los folds se preparan una única vez y luego se reutilizan en todos los modelos.
+
+
 ```{r preprocesamiento_calc_folds, results='hide', echo=FALSE}
 
 #===========================================================
@@ -1082,6 +1137,8 @@ preparar_folds_credits <- function(folds, receta, credits_actores, credits_direc
 }
 
 ```
+
+Con los folds ya preparados implementamos una función general para evaluar modelos mediante validación cruzada. Esta función entrena el modelo en cada fold, obtiene las predicciones sobre el conjunto de evaluación y calcula las métricas de interés (RMSE, MSE y R^2). De esta forma todos los modelos son evaluados exactamente sobre las mismas particiones de los datos, haciendo que la comparación entre ellos sea justa.
 
 ```{r cross_validate, results='hide', echo=FALSE}
  
@@ -1173,7 +1230,9 @@ evaluar_modelo_cv <- function(model_spec,
 
 ```
 
-```{r tune_hiperparametros, results='hide', echo=FALSE}
+Los modelos que poseen hiperparámetros (como Random Forest y XGBoost) requieren una etapa adicional para seleccionar su configuración. Para ello implementamos una búsqueda en grilla (grid search), donde se evalúan distintas combinaciones de hiperparámetros utilizando un conjunto de folds independiente del empleado para reportar el desempeño final. Una vez seleccionada la mejor combinación, el modelo correspondiente se vuelve a evaluar sobre los folds principales para compararlo con el resto de los modelos.
+
+```{r tune_hiperparametros, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
 
 #===========================================================
 # 10. Tuning de hiperparámetros (equivalente a tune_grid())
@@ -1181,11 +1240,45 @@ evaluar_modelo_cv <- function(model_spec,
 #     actualiza los argumentos del model_spec y evalúa en
 #     todos los folds.
 #===========================================================
+
+#----------------------------------------------------------------
+# Actualiza los hiperparámetros de un model_spec, sea cual sea
+# su tipo: los que son argumentos "principales" (mtry, min_n,
+# trees) van por set_args(); los que son específicos del engine
+# (max.depth, sample.fraction, etc., seteados originalmente
+# dentro de set_engine(..., max.depth = tune())) van por
+# set_engine(). Sin esto, set_args() ignora en silencio
+# cualquier hiperparámetro que no sea un argumento principal.
+#----------------------------------------------------------------
+
+actualizar_hiperparametros <- function(model_spec, params_row){
  
+    params_list <- as.list(params_row)
+ 
+    nombres_principales <- names(model_spec$args)
+    nombres_engine       <- names(model_spec$eng_args)
+ 
+    principales_a_setear <- params_list[names(params_list) %in% nombres_principales]
+    engine_a_setear       <- params_list[names(params_list) %in% nombres_engine]
+ 
+    if (length(principales_a_setear) > 0) {
+        model_spec <- rlang::exec(set_args, model_spec, !!!principales_a_setear)
+    }
+ 
+    if (length(engine_a_setear) > 0) {
+        model_spec <- rlang::exec(
+            set_engine, model_spec, engine = model_spec$engine, !!!engine_a_setear
+        )
+    }
+ 
+    model_spec
+}
+
+
 tune_grid_manual <- function(model_spec,
                              grid,
                              folds_preparados,
-                             metricas = metric_set(rmse, mae, rsq),
+                             metricas = metric_set(rmse, mse, rsq),
                              construir_wf = construir_wf_formula){
  
     map_dfr(
@@ -1195,7 +1288,7 @@ tune_grid_manual <- function(model_spec,
             params_g <- grid[g, ]
  
             # Reemplaza los tune() del model_spec por los valores de esta fila
-            modelo_actual <- rlang::exec(set_args, model_spec, !!!as.list(params_g))
+            modelo_actual <- actualizar_hiperparametros(model_spec, params_g)
  
             resultado_g <- evaluar_modelo_cv(
                 modelo_actual, folds_preparados, metricas, construir_wf
@@ -1218,13 +1311,21 @@ folds_preparados <- preparar_folds_credits(
     cv_folds, receta_base, credits_actores, credits_directores
 )
 
+
+# Folds separados SOLO para elegir hiperparámetros (nunca para reportar error)
+
+folds_preparados_tuning <- preparar_folds_credits(
+    cv_folds_tuning, receta_base, credits_actores, credits_directores
+)
+
 ```
 
 
-#### Regresión lineal (Baseline)
+#### Regresión lineal
 
+Como línea de base, ajustamos una regresión lineal múltiple utilizando todas las variables disponibles luego del preprocesamiento. Este modelo supone que el efecto de cada predictor sobre el imdb_score es lineal y aditivo, por lo que sirve como referencia para evaluar si modelos más complejos logran mejorar el desempeño predictivo.
 
-```{r regresion_lineal, echo=FALSE, warning=FALSE, message=FALSE}
+```{r regresion_lineal, results='hide', echo=FALSE, warning=FALSE, message=FALSE}
 
 # Modelo
 
@@ -1245,24 +1346,22 @@ metricas_lm <- cv_lm$resumen
 print(metricas_lm)
 
 
-# MSE
-
-mse_lm <- cv_lm$mse
-
-print(mse_lm)
 
 ```
+La validación cruzada arrojó un MSE promedio de 1.162, equivalente a un RMSE de 1.076, con un R^2 de 0.221. Esto indica que el modelo logra explicar aproximadamente un 22% de la variabilidad del puntaje de IMDB y comete, en promedio, un error cercano a 1.08 puntos sobre la escala de puntuación.
+ 
+#### GAM
 
-#### GAM (splines)
+A continuación ajustamos un Modelo Aditivo Generalizado (GAM). A diferencia de la regresión lineal, este modelo permite que algunas variables numéricas tengan una relación no lineal con el imdb_score mediante funciones suaves (splines), mientras que el resto de las variables (como las dummies y las variables obtenidas mediante TF-IDF) se incorporan de forma lineal. Esto permite capturar patrones más complejos sin perder interpretabilidad.
 
-```{r gam, echo=FALSE, warning=FALSE, message=FALSE}
+```{r gam, results='hide', echo=FALSE, warning=FALSE, message=FALSE}
  
 # GAM necesita s() en las variables continuas "de verdad" (no en dummies
 # 0/1 ni en las columnas de TF-IDF, que quedan como términos lineales).
 # Como los nombres de columnas pueden variar un poco entre folds (según
 # qué categorías/tokens pasaron el umbral en step_dummy/step_tokenfilter
 # de ESE fold), la fórmula se arma dinámicamente a partir de train_baked.
- 
+
 construir_formula_gam <- function(train_baked,
                                   vars_suaves = c(
                                       "imdb_votes", "runtime", "release_year",
@@ -1304,6 +1403,13 @@ cv_gam <- evaluar_modelo_cv(
  
 print(cv_gam$resumen)
  
+
+
+```
+
+La validación cruzada obtuvo un MSE promedio de 1.105, un RMSE de 1.049 y un R^2 de 0.253. Comparado con la regresión lineal, el GAM redujo el error de predicción y aumentó la proporción de variabilidad explicada, lo que sugiere que existen relaciones no lineales entre algunas variables numéricas y el puntaje de IMDB que la regresión lineal no logra capturar.
+
+```{r EDF, results='hide', echo=FALSE}
 #-------------------------------------------------------------
 # Ver el EDF (effective degrees of freedom) de cada s()
 #-------------------------------------------------------------
@@ -1320,14 +1426,14 @@ edf_por_fold <-
     )
  
 print(edf_por_fold)
-
 ```
 
 
-#### Modelo mixto (lmer)
+#### Modelo mixto
 
-```{r modelo_mixto, echo=FALSE, warning=FALSE, message=FALSE}
- 
+También evaluamos un modelo de efectos mixtos. En este caso se utilizaron todas las variables como efectos fijos y se agregó un intercepto aleatorio asociado al director principal de cada película. La idea es capturar posibles diferencias sistemáticas entre directores que no puedan explicarse únicamente mediante las demás variables incluidas en el modelo.
+
+```{r modelo_mixto, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
 
  
 # La fórmula lleva todos los predictores como efectos fijos, más
@@ -1381,10 +1487,22 @@ cv_mixto <- evaluar_modelo_cv(
  
 print(cv_mixto$resumen)
  
+
+
+```
+
+La validación cruzada produjo un MSE promedio de 1.162, un RMSE de 1.076 y un R^2 de 0.221. Estos resultados son prácticamente idénticos a los obtenidos con la regresión lineal, lo que indica que incorporar un intercepto aleatorio para el director principal no aporta una mejora apreciable en la capacidad predictiva del modelo.
+
+Una posible explicación es que la mayoría de los directores aparecen en muy pocas películas dentro del conjunto de datos, por lo que el modelo dispone de poca información para estimar con precisión un efecto aleatorio específico para cada uno.
+
+```{r Varianza_explicada_efecto_aleatorio , echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+
 # Varianza explicada por el efecto aleatorio de director
 # (cuanto más grande frente a la varianza residual, más "peso"
 # tiene el director como fuente de variación)
+
 summary(extract_fit_engine(cv_mixto$fits[["Fold1"]]))
+
 ```
 
 #### Random Forest
@@ -1393,78 +1511,124 @@ El modelo Random Forest es un modelo que aprovecha la robustez del árbol de dec
 
 Para predecir un nuevo valor, cada árbol hace su predicción, y luego se promedia el resultado (o, si fuera categórica, se elige la categoría con más votos).
 
-Para nuestro modelo, decidimos hacer 500 árboles, pero la cantidad $m$ de variables por paso y $min_n$, la minima cantidad de residuos necesarios en un nodo para poder generarle hojas, los ajustamos automaticamente probando el modelo con varios hiperparámetros, y eligiendo el que mejor funcionara. Si $m$ es demasiado bajo, los árboles van a ser poco precisos, y no van a servir, pero si es demasiado grande, van a ser demasiado similares, y se pierde la ventaja del random forest. Por otro lado, si $min_n$ es demasiado bajo, corremos el riesgo de sobreajustar, mientras que si es muy alto, desajustamos. El modelo se prueba con cross validation. En este caso, nos dio que $mtry = 30$ y $min_n = 6$ son los mejores hiperparámetros dentro de los rangos $[5, 30]$ y $[2, 10]$. Es llamativo que `mtry` de tan alto, porque suele ser un tercio del total de las variables cuando la incógnita es continua, pero en este caso, muchas de nuestras variables son en realidad dummies de categóricas, así que son variables débiles, y por eso requiere tantas.
+Para nuestro modelo, decidimos hacer 500 árboles, pero la cantidad $mtry$ de variables por paso, $min_n$, la minima cantidad de residuos necesarios en un nodo para poder generarle hojas, max.depth y sample.fraction se seleccionaron automáticamente mediante una búsqueda sobre una grilla de valores, utilizando validación cruzada sobre un conjunto de datos separado del utilizado para reportar el desempeño final. De esta forma evitamos que la selección de hiperparámetros influya en la estimación del error.
 
-El error absoluto y el cuadrático dieron relativamente bajos, y rsq dio 0.38, por lo que el modelo no es tan bueno explicando la varianza.
+Si $m$ es demasiado bajo, los árboles van a ser poco precisos, y no van a servir, pero si es demasiado grande, van a ser demasiado similares, y se pierde la ventaja del random forest. Por otro lado, si $min_n$ es demasiado bajo, corremos el riesgo de sobreajustar, mientras que si es muy alto, desajustamos. Los mejores valores encontrados fueron mtry = 78, min_n = 8, max.depth = 26 y sample.fraction = 0.975. El valor elevado de mtry puede parecer llamativo, ya que habitualmente en problemas de regresión se utilizan aproximadamente un tercio de las variables. Sin embargo, en este caso gran parte de los predictores provienen de variables dummy y de la representación TF-IDF del texto, por lo que muchas de ellas contienen información limitada de manera individual. Permitir que cada división del árbol considere un mayor número de variables aumenta las probabilidades de encontrar particiones informativas.
 
-```{r random_forest, echo=FALSE, warning=FALSE, message=FALSE}
- 
+```{r random_forest, results='hide', echo=FALSE, warning=FALSE, message=FALSE}
+
+# max.depth y sample.fraction son argumentos de ranger, no argumentos
+# "principales" de rand_forest() -> van dentro de set_engine(), y
+# necesitan actualizar_hiperparametros() (no set_args() a secas) para
+# poder tunearse con nuestro tune_grid_manual().
+
+
 rf_spec <-
     rand_forest(
         trees = 500,
         mtry  = tune(),
         min_n = tune()
     ) %>%
-    set_engine("ranger", 
-               importance = "impurity",
-               #max.depth = 30,
-               #sample.fraction = tune()
-               ) %>%
+    set_engine(
+        "ranger",
+        importance      = "impurity",
+        max.depth       = tune(),
+        sample.fraction = tune()
+    ) %>%
     set_mode("regression")
+
+# dials no trae parámetros armados para max.depth/sample.fraction con
+# esos nombres exactos (los de ranger usan punto, dials usa snake_case),
+# así que los armamos a mano. El nombre dentro de label = c(...) es el
+# que va a terminar como nombre de columna en la grilla, y tiene que
+# coincidir EXACTO con el argumento de ranger.
+
+max_depth_param <- new_quant_param(
+    type      = "integer",
+    range     = c(20L, 45L),
+    inclusive = c(TRUE, TRUE),
+    label     = c(`max.depth` = "Profundidad máxima"),
+    finalize  = NULL
+)
  
+sample_fraction_param <- new_quant_param(
+    type      = "double",
+    range     = c(0.5, 1),
+    inclusive = c(TRUE, TRUE),
+    label     = c(`sample.fraction` = "Fracción de muestreo"),
+    finalize  = NULL
+)
+
+
+# Con 4 hiperparámetros, una grilla regular (levels^4) se vuelve cara
+# rápido. Usamos grid_latin_hypercube en su lugar: cubre el espacio
+# razonablemente bien con un presupuesto fijo de combinaciones (`size`),
+# en vez de crecer exponencialmente.
+
+set.seed(123)
+
 rf_grid <-
-    grid_regular(
-        mtry(range = c(5, 50)), # suele ser un tercio de la cantidad total de parámetros
-        #sample.fraction = sample_prop(range = c(0.6, 1)),
+    grid_latin_hypercube(
+        mtry(range = c(30, 80)),
         min_n(range = c(2, 10)),
-        levels = 3
+        max_depth_param,
+        sample_fraction_param,
+        size = 40
     )
  
-# Reutiliza folds_preparados (misma receta, no hace falta recalcular
-# las features de credits ni el prep/bake)
+# Elegir hiperparámetros SOLO con folds_preparados_tuning: datos
+# separados desde el inicio (datos_tuning), que nunca se usan para
+# reportar error, así no hay doble-dipping.
+
 cv_results <- tune_grid_manual(
     model_spec       = rf_spec,
     grid             = rf_grid,
-    folds_preparados = folds_preparados,
-    metricas         = metric_set(rmse, mae, rsq)
+    folds_preparados = folds_preparados_tuning,
+    metricas         = metric_set(rmse, mse, rsq)
 )
  
-print(cv_results)
+# print(cv_results)
  
 # Mejores hiperparámetros según RMSE (equivalente a select_best())
+
 best_params <-
     cv_results %>%
-    filter(.metric == "rmse") %>%
+    filter(.metric == "mse") %>%
     arrange(mean) %>%
     slice(1)
  
 print(best_params)
  
-# Modelo final con los mejores hiperparámetros, ajustado en TODOS los folds
-# (o, si querés el modelo de producción, ver nota más abajo para
-# entrenarlo con todo `titles`)
+# Modelo final con los mejores hiperparámetros. Se evalúa con
+# folds_preparados (datos_principales) -> los mismos folds "de reporte"
+# que LM, GAM y el mixto, y disjuntos de los datos usados para elegir
+# mtry/min_n, así el error reportado no está inflado por haber elegido
+# los hiperparámetros mirando (parte de) estos mismos datos.
+
 rf_spec_final <-
     rand_forest(
         trees = 500,
         mtry  = best_params$mtry,
         min_n = best_params$min_n
     ) %>%
-    set_engine("ranger", 
-               importance = "impurity", 
-               #max.depth = 30,
-               #sample.fraction = best_params$sample.fraction
-               ) %>%
+    set_engine(
+        "ranger",
+        importance      = "impurity",
+        max.depth       = best_params$max.depth,
+        sample.fraction = best_params$sample.fraction
+    ) %>%
     set_mode("regression")
  
-cv_rf_final <- evaluar_modelo_cv(rf_spec_final, folds_preparados, metric_set(rmse, mae, rsq))
+cv_rf_final <- evaluar_modelo_cv(rf_spec_final, folds_preparados, metric_set(rmse, mse, rsq))
 print(cv_rf_final$resumen)
+
 ```
 
-
+Una vez seleccionados los hiperparámetros, el modelo se volvió a evaluar utilizando los mismos folds empleados para comparar todos los modelos anteriores. El Random Forest obtuvo un MSE promedio de 0.850, un RMSE de 0.920 y un R^2 de 0.393, mejorando de manera considerable a la regresión lineal, al modelo mixto y al GAM. Esto sugiere que existen relaciones complejas e interacciones entre las variables que los modelos lineales no logran capturar, mientras que el Random Forest puede modelarlas de manera flexible.
 
 #### XGBoost
 
-XGBoost es otro modelo que usa Bosques, pero de una forma distinta al anterior. En XGBoost vamos a hacer un bosque de residuos, que nos van a permitir ajustar la predicción base, el promedio de los `Scores`.
+XGBoost es otro modelo basado en árboles de decisión, pero su estrategia es distinta a la del Random Forest. Mientras que en un Random Forest todos los árboles se construyen de manera independiente y luego se promedian sus predicciones, en XGBoost los árboles se generan de forma secuencial. El primer árbol parte de una predicción inicial, que en este caso es el promedio de los Scores, y cada árbol posterior intenta corregir los errores cometidos por los anteriores. De esta manera, el modelo va refinando progresivamente sus predicciones.
 
 Nuestros árboles no van a ser completos. Para decidir si un nodo amerita dividirse en dos hojas, vamos a calcular los índices de similitud de los nodos, y calcular la ganancia de similitud que nos dan las hojas. Si la ganancia es suficientemente buena (límite definido por el modelador), mantenemos las hojas. Hacemos las divisiones maximizando la similitud.
 
@@ -1472,42 +1636,83 @@ La similitud de un nodo la medimos como la suma de los residuos en ese nodo (si 
 
 Otra consideración importante es que la construcción de árboles es iterativa. La primera predicción es el promedio de los scores. El primer árbol contiene en sus nodos los residuos respecto a esa predicción. El segundo árbol contiene los residuos respecto a la predicción conjunta del promedio y el primer árbol. Así, cada árbol corrige sobre los anteriores. Para hacer esta aproximación al resultado correcto cada vez más gradual, se utiliza una tasa de aprendizaje. Así, una predicción es el promedio más la suma de los residuos de los árboles multiplicados por la tasa de aprendizaje, un número entre 0 y 1.
 
-En nuestro caso, primero entrenamos el modelo por cross validation para que elija los hiperparámetros tree_depth (profundidad máxima de los árboles), trees (cantidad de árboles), y learn_rate (tasa de aprendizaje). Dieron $2$,	$50$, y	$1.258925$. En general, la tasa de aprendizaje es inversamente proporcional a la cantidad de árboles, y tener árboles poco profundos es conveniente.
+Para evitar el sobreajuste, XGBoost incorpora distintos mecanismos de regularización. Entre ellos se encuentran la profundidad máxima de los árboles (tree_depth), la tasa de aprendizaje (learn_rate), que controla cuánto contribuye cada árbol nuevo a la predicción final, el parámetro loss_reduction, que exige una mejora mínima antes de realizar una nueva división en un árbol, y sample_size, que determina qué proporción de las observaciones se utiliza para entrenar cada árbol. Además, al igual que en Random Forest, el parámetro mtry controla cuántas variables candidatas se consideran en cada división.
 
-El error absoluto y el cuadrático dieron relativamente bajos, y rsq dio 0.38, por lo que el modelo no es tan bueno explicando la varianza
+Los hiperparámetros se seleccionaron mediante validación cruzada utilizando el conjunto de datos reservado para tuning, de forma independiente al conjunto empleado para evaluar el desempeño final del modelo. Los mejores valores obtenidos fueron mtry = 104, trees = 996, tree_depth = 6, learn_rate = 0.026, loss_reduction = 2.67 y sample_size = 0.904. Estos valores indican que el modelo prefiere construir una gran cantidad de árboles relativamente poco profundos, realizando pequeñas correcciones en cada iteración mediante una tasa de aprendizaje baja, una estrategia característica de los métodos de gradient boosting.
+
+Finalmente, el modelo se evaluó utilizando los mismos folds empleados para el resto de los modelos, obteniendo un MSE promedio de 0.836, un RMSE de 0.913 y un R² de 0.396. Estos resultados fueron los mejores de todos los modelos evaluados, aunque la mejora respecto del Random Forest fue relativamente pequeña. Esto sugiere que la estrategia de boosting logra aprovechar ligeramente mejor la información disponible, convirtiendo a XGBoost en el modelo con mayor capacidad predictiva para estimar el IMDB Score en este conjunto de datos.
 
 ```{r XGBoost, echo=FALSE, results="hide"}
-library(xgboost)
+
 
 xgb_spec <-
     boost_tree(
-        tree_depth = tune(),
-        trees = tune(),
-        learn_rate = tune()
+        mtry           = tune(),
+        trees          = tune(),
+        tree_depth     = tune(),
+        learn_rate     = tune(),
+        loss_reduction = tune(),
+        sample_size    = tune()
     ) %>%
     set_engine("xgboost") %>%
     set_mode("regression")
+
+# mtry necesita un rango finito explícito (a diferencia de trees/tree_depth,
+# dials no le pone un default razonable solo). Lo calculamos en base a la
+# cantidad real de predictores del dataset, en vez de tirar un número fijo.
+n_predictores <-
+    ncol(folds_preparados_tuning[[1]]$train_baked) - 1 - length(VARS_NO_PREDICTORAS)
  
+mtry_min <- max(2, floor(n_predictores * 0.05))
+mtry_max <- floor(n_predictores * 0.5)
+ 
+# sample_size (el argumento "principal" de boost_tree que se traduce a
+# `subsample` en xgboost) no tiene un dials::sample_size() con ese nombre
+# exacto -- dials::sample_prop() existe pero su columna se llamaría
+# "sample_prop", que NO calza con el argumento real ("sample_size"), y
+# actualizar_hiperparametros() la ignoraría en silencio. Lo armamos a mano
+# para que el nombre de columna sea el correcto.
+sample_size_param <- new_quant_param(
+    type      = "double",
+    range     = c(0.5, 1),
+    inclusive = c(TRUE, TRUE),
+    label     = c(sample_size = "Proporción de filas muestreadas"),
+    finalize  = NULL
+)
+
+
+set.seed(123)
 xgb_grid <-
-    grid_regular(
-        tree_depth(range = c(2, 3)),
-        trees(range = c(50, 100)),
-        learn_rate(range = c(0.1, 0.5)),
-        levels = 3
+    grid_latin_hypercube(
+        mtry(range = c(mtry_min, mtry_max)),
+        trees(range = c(200, 1000)),
+        tree_depth(range = c(2, 8)),
+        # learn_rate() por defecto trabaja en escala log10 (range = c(-10,-1)
+        # equivale a tasas reales de 1e-10 a 0.1). trans = NULL hace que el
+        # range se use tal cual, en escala lineal -- si no, c(0.01, 0.3) se
+        # interpretaría como EXPONENTES de 10 (tasas reales > 1, altísimas).
+        learn_rate(range = c(0.01, 0.3), trans = NULL),
+        # loss_reduction (gamma) sí suele buscarse en escala log -- dejamos
+        # el trans = log10_trans() default, solo acotamos el rango.
+        loss_reduction(range = c(-10, 1)),
+        sample_size_param,
+        size = 30
     )
  
-# Reutiliza folds_preparados (misma receta, no hace falta recalcular
-# las features de credits ni el prep/bake)
+# Elegir hiperparámetros SOLO con folds_preparados_tuning (datos
+# separados desde el inicio, que nunca se usan para reportar error)
 cv_results <- tune_grid_manual(
     model_spec       = xgb_spec,
     grid             = xgb_grid,
-    folds_preparados = folds_preparados,
-    metricas         = metric_set(rmse, mae, rsq)
+    folds_preparados = folds_preparados_tuning,
+    metricas         = metric_set(rmse, mse, rsq)
 )
  
 print(cv_results)
  
+
 # Mejores hiperparámetros según RMSE (equivalente a select_best())
+
 best_params <-
     cv_results %>%
     filter(.metric == "rmse") %>%
@@ -1516,39 +1721,245 @@ best_params <-
  
 print(best_params)
  
-# Modelo final con los mejores hiperparámetros, ajustado en TODOS los folds
-# (o, si querés el modelo de producción, ver nota más abajo para
-# entrenarlo con todo `titles`)
+# Modelo final. Se evalúa con
+# folds_preparados (datos_principales) -> mismos folds de reporte que
+# el resto de los modelos, disjuntos de los usados para tunear.
+
 xgb_spec_final <-
     boost_tree(
-        tree_depth = best_params$tree_depth,
-        trees = best_params$trees
+        mtry           = best_params$mtry,
+        trees          = best_params$trees,
+        tree_depth     = best_params$tree_depth,
+        learn_rate     = best_params$learn_rate,
+        loss_reduction = best_params$loss_reduction,
+        sample_size    = best_params$sample_size
     ) %>%
     set_engine("xgboost") %>%
     set_mode("regression")
  
-cv_xgb_final <- evaluar_modelo_cv(xgb_spec_final, folds_preparados, metric_set(rmse, mae, rsq))
+cv_xgb_final <- evaluar_modelo_cv(xgb_spec_final, folds_preparados, metric_set(rmse, mse, rsq))
 print(cv_xgb_final$resumen)
 
 ```
 
-4. Competencia. En los archivos titles_test.csv y credits_test.csv aparecen
-1652 nuevos títulos, para los cuales no se incluye el rating de IMDB (pero yo sí
-lo tengo). A partir del modelo elegido en el ítem anterior, producir un archivo
-predicciones_<apellido1>_<apellido2>_<apellido3>.csv con una sola columna
-y sin encabezado, donde la fila i contenga la predicción del rating de IMDB para el
-título de la fila i (debe tener tantas filas como el test). A partir de esas predicciones, yo
-voy a computar el error cuadrático medio de cada equipo, y gana el que tenga el menor.
 
-```{r nuestras_predicciones, echo=FALSE, results="hide"}
 
-# hacer las predicciones
 
-titles_test <- read.csv("titles_test.csv",
-                   stringsAsFactors = FALSE)
+```{r modelo_final_produccion, echo=FALSE, warning=FALSE, message=FALSE}
 
-credits_test <- read.csv("credits_test.csv",
-                   stringsAsFactors = FALSE)
+#### Modelo final de producción (todos los datos) 
+
+# Ya elegimos xgboost con estos hiperparámetros (salieron del tuning
+# con folds_preparados_tuning). Ahora reentrenamos con TODO `titles`
+# (datos_principales + datos_tuning juntos -- `titles` nunca se
+# sobreescribió, sigue teniendo el dataset completo).
+ 
+# 1. Stats de actor/director con TODO titles (no por fold)
+stats_final <- calcular_stats_credits(titles, credits_actores, credits_directores)
+ 
+# 2. Leave-one-out sigue haciendo falta acá: sin esto, el promedio del
+#    actor/director de una película incluiría el score de esa misma
+#    película -> fuga dentro del propio set de entrenamiento final.
+titles_final <- aplicar_features_credits(
+    titles, stats_final, credits_actores, credits_directores,
+    leave_one_out = TRUE
+)
+ 
+# 3. Prep de la receta con TODO el dataset de entrenamiento
+receta_final_prep <- prep(receta_base, training = titles_final)
+train_final_baked <- juice(receta_final_prep)
+ 
+# 4. Modelo final con los hiperparámetros elegidos
+xgb_spec_final <-
+    boost_tree(
+        mtry           = 104,
+        trees          = 996,
+        tree_depth     = 6,
+        learn_rate     = 0.02603373,
+        loss_reduction = 2.671484,
+        sample_size    = 0.9035809
+    ) %>%
+    set_engine("xgboost") %>%
+    set_mode("regression")
+ 
+# Reutilizamos construir_wf_formula() (no add_formula(imdb_score ~ .) a
+# mano) para que director_principal se excluya automáticamente, igual
+# que en todos los folds anteriores.
+wf_final    <- construir_wf_formula(xgb_spec_final, train_final_baked)
+modelo_final <- fit(wf_final, data = train_final_baked)
 
 ```
+
+
+
+```{r prediccion_test, echo=FALSE, warning=FALSE, message=FALSE}
+
+
+#### Predicciones sobre titles_test / credits_test
+
+titles_test_raw <- read_csv("titles_test.csv")
+credits_test    <- read_csv("credits_test.csv")
+
+credits_test_actores    <- credits_test %>% filter(role == "ACTOR")
+credits_test_directores <- credits_test %>% filter(role == "DIRECTOR")
+
+#-----------------------------------------------------------
+# 1. Features estructurales (no usan imdb_score, reutilizan las
+#    tablas de popularidad -pop_actores/pop_directores- ya
+#    calculadas con el training)
+#-----------------------------------------------------------
+
+n_actores_test <-
+    credits_test_actores %>%
+    distinct(id, person_id) %>%
+    count(id, name = "n_actores")
+
+n_directores_test <-
+    credits_test_directores %>%
+    distinct(id, person_id) %>%
+    count(id, name = "n_directores")
+
+
+
+top10_actores_test <-
+  credits_test_actores %>%
+  distinct(id, person_id) %>%
+  count(person_id, name = "n_peliculas") %>%
+  arrange(desc(n_peliculas)) %>%
+  slice_head(prop = 0.10) %>%
+  pull(person_id)
+
+
+top10_directores_test <-
+  credits_test_directores %>%
+  distinct(id, person_id) %>%
+  count(person_id, name = "n_peliculas") %>%
+  arrange(desc(n_peliculas)) %>%
+  slice_head(prop = 0.10) %>%
+  pull(person_id)
+
+
+# Cantidad de actores populares por película
+actor_popular_test <-
+    credits_test_actores %>%
+    distinct(id, person_id) %>%
+    mutate(actor_popular = person_id %in% top10_actores) %>%
+    group_by(id) %>%
+    summarise(actor_popular = sum(actor_popular), .groups = "drop")
+
+# Cantidad de directores que pertenecen al top10_directores DEL TRAINING
+director_popular_test <-
+    credits_test_directores %>%
+    distinct(id, person_id) %>%
+    mutate(director_popular = person_id %in% top10_directores) %>%
+    group_by(id) %>%
+    summarise(director_popular = sum(director_popular), .groups = "drop")
+
+
+pop_directores_test <-
+  credits_test_directores %>%
+  distinct(id, person_id) %>%
+  count(person_id, name = "n_pelis_director")
+
+
+set.seed(123)
+
+director_principal_test <-
+  credits_test_directores %>%
+  distinct(id, person_id, name) %>%
+  filter(!is.na(person_id), !is.na(name), str_trim(name) != "") %>%
+  left_join(pop_directores_test, by = "person_id") %>%
+  mutate(n_pelis_director = replace_na(n_pelis_director, 0)) %>%
+  group_by(id) %>%
+  slice_max(n_pelis_director, n = 1, with_ties = TRUE) %>%  # el/los más popular(es)
+  slice_sample(n = 1) %>%                                    # desempate al azar
+  ungroup() %>%
+  transmute(id, director_principal = as.character(person_id))
+
+titles_test_raw <-
+    titles_test_raw %>%
+    left_join(n_actores_test, by = "id") %>%
+    left_join(n_directores_test, by = "id") %>%
+    left_join(actor_popular_test, by = "id") %>%
+    left_join(director_popular_test, by = "id") %>%
+    left_join(director_principal_test, by = "id") %>%
+    mutate(
+        n_actores           = replace_na(n_actores, 0),
+        n_directores        = replace_na(n_directores, 0),
+        actor_popular       = replace_na(actor_popular, 0),
+        director_popular    = replace_na(director_popular, 0),
+        director_principal  = replace_na(director_principal, "Unknown"),
+        seasons              = replace_na(seasons, 0),
+        imdb_score           = 0,   # necesario para aplicar_features_credits()
+        actor_mean_score     = 0,
+        actor_max_score      = 0,
+        director_mean_score  = 0,
+        director_max_score   = 0
+    )
+
+
+
+#-----------------------------------------------------------
+# 2. Dummies de genre/country -- MISMAS categorías del training
+#-----------------------------------------------------------
+
+categorias_genre   <- names(titles) %>% str_subset("^genre_")   %>% str_remove("^genre_")   %>% setdiff("Other")
+categorias_country <- names(titles) %>% str_subset("^country_") %>% str_remove("^country_") %>% setdiff("Other")
+
+titles_test_features <-
+    titles_test_raw %>%
+    aplicar_dummies_lista(genres, "genre", categorias_genre, es_lista = TRUE) %>%
+    aplicar_dummies_lista(production_countries, "country", categorias_country, es_lista = FALSE)
+
+#-----------------------------------------------------------
+# 3. actor_mean_score / actor_max_score / director_mean_score /
+#    director_max_score: usan stats_final (training completo).
+#    leave_one_out = FALSE porque estas películas nunca
+#    participaron del cálculo de esos promedios.
+#-----------------------------------------------------------
+
+titles_test_final <- aplicar_features_credits(
+    titles_test_features, stats_final,
+    credits_test_actores, credits_test_directores,
+    leave_one_out = FALSE
+)
+
+#-----------------------------------------------------------
+# 4. bake() + predict()
+#-----------------------------------------------------------
+
+test_baked <- bake(receta_final_prep, new_data = titles_test_final)
+
+preds_test <- predict(modelo_final, new_data = test_baked)$.pred
+
+predicciones_ordenadas <-
+    tibble(id = titles_test_raw$id) %>%
+    left_join(
+        tibble(id = titles_test_final$id, .pred = preds_test),
+        by = "id"
+    ) %>%
+    pull(.pred)
+
+stopifnot(length(predicciones_ordenadas) == nrow(titles_test_raw))
+message("Predicciones NA: ", sum(is.na(predicciones_ordenadas)))
+
+#-----------------------------------------------------------
+# 5. Archivo final
+#-----------------------------------------------------------
+
+apellidos <- c("ALLAMI", "VANOTTI")
+
+nombre_archivo <- paste0("predicciones_", paste(apellidos, collapse = "_"), ".csv")
+
+write.table(
+    predicciones_ordenadas,
+    file      = nombre_archivo,
+    row.names = FALSE,
+    col.names = FALSE,
+    sep       = ",",
+    na        = "NA"
+)
+
+```
+
 
